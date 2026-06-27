@@ -696,7 +696,12 @@ def parse_date(val) -> str:
     # nonsensical date.
     for candidate in (s, s_fixed):
         try:
-            parsed = pd.to_datetime(candidate, dayfirst=True, errors="coerce")
+            parsed = pd.to_datetime(
+                candidate,
+                dayfirst=False,
+                errors="coerce",
+                utc=False
+            )
         except Exception:
             continue
         if pd.notna(parsed) and 1990 <= parsed.year <= 2100:
