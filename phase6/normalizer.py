@@ -270,7 +270,8 @@ def _extract_time(row, roles: dict) -> str:
         if "time" not in col_lower and "timestamp" not in col_lower:
             continue
         val = _get(row, col)
-        if not val:
+
+        if val is None or pd.isna(val):
             continue
         m = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", str(val))
         if m:
