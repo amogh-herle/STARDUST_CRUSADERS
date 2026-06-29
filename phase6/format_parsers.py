@@ -116,10 +116,15 @@ def parse_xlsx(file_path):
         for engine in (("xlrd" if ext == ".xls" else "openpyxl"), None):
             try:
                 kw = {"engine": engine} if engine else {}
-                df = pd.read_excel(
-                    file_path, header=hrow, dtype=str,
-                    skip_blank_lines=True, **kw
-                )
+                try:
+                    df = pd.read_excel(
+                        file_path, header=hrow, dtype=str,
+                        skip_blank_lines=True, **kw
+                    )
+                except TypeError:
+                    # Older/newer pandas may not accept skip_blank_lines for read_excel
+                    df = pd.read_excel(file_path, header=hrow, dtype=str, **kw)
+
                 if (len(df.columns) >= 4 and
                         not all(str(c).startswith("Unnamed") for c in df.columns)):
                     break
@@ -346,8 +351,10 @@ def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnin
         with pdfplumber.open(file_path) as pdf:
             df = _word_position_parser(pdf, warnings)
         if not df.empty:
-            warnings.append("PDF: generic word-position parser")
-            return df, header_text, "pdf", warnings
+            if _is_valid_transaction_table(df):
+                warnings.append("PDF: generic word-position parser")
+                return df, header_text, "pdf", warnings
+            warnings.append("PDF: generic word-position parser produced invalid table")
 
         # Layer C: double-space text split
         df = _text_line_df(all_text_lines, double_space=True)
@@ -568,6 +575,39 @@ def _parse_bob(lines, warnings):
     if not rows: return pd.DataFrame()
     warnings.append(f"BOB: {len(rows)} txns")
     return pd.DataFrame(rows)
+
+
+def _is_valid_transaction_table(df):
+    if df.empty:
+        return False
+    try:
+        from schema_detector import assign_column_roles, parse_date, parse_amount
+        roles = assign_column_roles(df.columns.tolist(), df=df)
+    except Exception:
+        return False
+
+    if not roles.get("date"):
+        return False
+    if not (roles.get("debit") or roles.get("credit") or roles.get("amount")):
+        return False
+
+    valid_rows = 0
+    for _, row in df.head(30).iterrows():
+        date_val = parse_date(str(row[roles["date"]]))
+        if not date_val:
+            continue
+        if roles.get("debit") and roles.get("credit"):
+            d, _ = parse_amount(row[roles["debit"]])
+            c, _ = parse_amount(row[roles["credit"]])
+            if d != 0.0 or c != 0.0:
+                valid_rows += 1
+        elif roles.get("amount"):
+            a, _ = parse_amount(row[roles["amount"]])
+            if a != 0.0:
+                valid_rows += 1
+        if valid_rows >= 2:
+            return True
+    return False
 
 
 # ── Generic word-position ─────────────────────────────────────────────────
