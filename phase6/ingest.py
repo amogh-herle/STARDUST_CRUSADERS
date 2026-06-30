@@ -16,6 +16,7 @@ import os
 import argparse
 import pandas as pd
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 try:
     from phase6.ingestion_config import SUPPORTED_EXTENSIONS
@@ -112,8 +113,13 @@ def ingest_file(file_path: str, pdf_password: str = None,
     return normalized_df, report
 
 
+def _ingest_file_worker(file_path: str, pdf_password: str = None,
+                         pdf_password_candidates: list = None):
+    return ingest_file(file_path, pdf_password, pdf_password_candidates)
+
+
 def ingest_directory(input_path: str, out_dir: str, pdf_password: str = None,
-                      pdf_password_candidates: list = None):
+                      pdf_password_candidates: list = None, workers: int = 1):
     """Ingest all supported files in a directory tree."""
     files = []
     for root, _, filenames in os.walk(input_path):
@@ -122,17 +128,17 @@ def ingest_directory(input_path: str, out_dir: str, pdf_password: str = None,
             file_path = root_path / f
             if file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 files.append(file_path)
-    return _run_pipeline(files, out_dir, pdf_password, pdf_password_candidates)
+    return _run_pipeline(files, out_dir, pdf_password, pdf_password_candidates, workers)
 
 
 def ingest_single(file_path: str, out_dir: str, pdf_password: str = None,
-                   pdf_password_candidates: list = None):
+                   pdf_password_candidates: list = None, workers: int = 1):
     """Ingest a single file."""
-    return _run_pipeline([file_path], out_dir, pdf_password, pdf_password_candidates)
+    return _run_pipeline([file_path], out_dir, pdf_password, pdf_password_candidates, workers)
 
 
 def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
-                   pdf_password_candidates: list = None):
+                   pdf_password_candidates: list = None, workers: int = 1):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     all_dfs = []
@@ -141,25 +147,73 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
     print(f"\n{'='*60}")
     print(f"Phase 6 — Ingestion Pipeline")
     print(f"Files to process: {len(files)}")
+    if workers and workers != 1:
+        print(f"Parallel workers  : {workers}")
     print(f"{'='*60}")
 
-    for idx, file_path in enumerate(files, 1):
-        fname = Path(file_path).name
-        print(f"\n  [{idx}/{len(files)}] {fname}")
+    if workers is None or workers <= 1:
+        iterable = ((idx + 1, file_path, ingest_file(file_path, pdf_password, pdf_password_candidates))
+                    for idx, file_path in enumerate(files))
+        for idx, file_path, result in iterable:
+            fname = Path(file_path).name
+            df, report = result
+            print(f"\n  [{idx}/{len(files)}] {fname}")
 
-        df, report = ingest_file(file_path, pdf_password, pdf_password_candidates)
-        report_rows.append(report)
+            report_rows.append(report)
 
-        if not df.empty:
-            all_dfs.append(df)
-            print(f"    ✓ Bank    : {report['bank_detected']}")
-            print(f"    ✓ Rows    : {report['rows_parsed']} parsed → {report['rows_after_clean']} clean")
-            if report["parse_warnings"]:
-                print(f"    ⚠ Warnings: {report['parse_warnings'][:120]}")
-        else:
-            print(f"    ✗ Status  : {report['status']}")
-            if report["parse_warnings"]:
-                print(f"    ✗ Reason  : {report['parse_warnings'][:120]}")
+            if not df.empty:
+                all_dfs.append(df)
+                print(f"    ✓ Bank    : {report['bank_detected']}")
+                print(f"    ✓ Rows    : {report['rows_parsed']} parsed → {report['rows_after_clean']} clean")
+                if report["parse_warnings"]:
+                    print(f"    ⚠ Warnings: {report['parse_warnings'][:120]}")
+            else:
+                print(f"    ✗ Status  : {report['status']}")
+                if report["parse_warnings"]:
+                    print(f"    ✗ Reason  : {report['parse_warnings'][:120]}")
+    else:
+        max_workers = workers if workers > 0 else max(1, os.cpu_count() - 1)
+        print(f"Using {max_workers} worker processes")
+        futures = {}
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            for idx, file_path in enumerate(files):
+                future = executor.submit(
+                    _ingest_file_worker,
+                    str(file_path),
+                    pdf_password,
+                    pdf_password_candidates,
+                )
+                futures[future] = (idx + 1, file_path)
+            for future in as_completed(futures):
+                idx, file_path = futures[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = (pd.DataFrame(), {
+                        "file": Path(file_path).name,
+                        "extension": Path(file_path).suffix.lower(),
+                        "bank_detected": "",
+                        "rows_parsed": 0,
+                        "rows_after_clean": 0,
+                        "parse_warnings": f"Parallel worker crash: {e}",
+                        "status": "error",
+                    })
+                fname = Path(file_path).name
+                df, report = result
+                print(f"\n  [{idx}/{len(files)}] {fname}")
+
+                report_rows.append(report)
+
+                if not df.empty:
+                    all_dfs.append(df)
+                    print(f"    ✓ Bank    : {report['bank_detected']}")
+                    print(f"    ✓ Rows    : {report['rows_parsed']} parsed → {report['rows_after_clean']} clean")
+                    if report["parse_warnings"]:
+                        print(f"    ⚠ Warnings: {report['parse_warnings'][:120]}")
+                else:
+                    print(f"    ✗ Status  : {report['status']}")
+                    if report["parse_warnings"]:
+                        print(f"    ✗ Reason  : {report['parse_warnings'][:120]}")
 
     # --- Merge and write ---
     if all_dfs:
@@ -245,13 +299,15 @@ if __name__ == "__main__":
     parser.add_argument("--pdf-passwords", default=None,
                          help="Comma-separated list of candidate passwords to try in order "
                               "(e.g. likely DOB/PAN/account-number-based formulas)")
+    parser.add_argument("--workers", type=int, default=1,
+                         help="Number of worker processes for parallel ingestion. Use 0 for auto.")
     args = parser.parse_args()
 
     candidates = [p.strip() for p in args.pdf_passwords.split(",")] if args.pdf_passwords else None
 
     if os.path.isdir(args.input):
-        ingest_directory(args.input, args.out_dir, args.pdf_password, candidates)
+        ingest_directory(args.input, args.out_dir, args.pdf_password, candidates, args.workers)
     elif os.path.isfile(args.input):
-        ingest_single(args.input, args.out_dir, args.pdf_password, candidates)
+        ingest_single(args.input, args.out_dir, args.pdf_password, candidates, args.workers)
     else:
         print(f"Error: {args.input} is not a valid file or directory")
