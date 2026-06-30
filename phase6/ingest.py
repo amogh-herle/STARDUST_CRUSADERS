@@ -17,9 +17,14 @@ import argparse
 import pandas as pd
 from pathlib import Path
 
-from ingestion_config import SUPPORTED_EXTENSIONS
-from format_parsers import parse_csv, parse_xlsx, parse_pdf, parse_image
-from normalizer import normalize
+try:
+    from phase6.ingestion_config import SUPPORTED_EXTENSIONS
+    from phase6.format_parsers import parse_csv, parse_xlsx, parse_pdf, parse_image, parse_txt
+    from phase6.normalizer import normalize
+except ImportError:
+    from ingestion_config import SUPPORTED_EXTENSIONS
+    from format_parsers import parse_csv, parse_xlsx, parse_pdf, parse_image, parse_txt
+    from normalizer import normalize
 
 
 def ingest_file(file_path: str, pdf_password: str = None,
@@ -62,7 +67,9 @@ def ingest_file(file_path: str, pdf_password: str = None,
         elif ext == ".json":
             from format_parsers import parse_json
             raw_df, header_text, source_format, parse_warnings = parse_json(file_path)
-        elif ext in (".tsv", ".txt"):
+        elif ext == ".txt":
+            raw_df, header_text, source_format, parse_warnings = parse_txt(file_path)
+        elif ext == ".tsv":
             from format_parsers import parse_tsv
             raw_df, header_text, source_format, parse_warnings = parse_tsv(file_path)
         else:
@@ -107,12 +114,14 @@ def ingest_file(file_path: str, pdf_password: str = None,
 
 def ingest_directory(input_path: str, out_dir: str, pdf_password: str = None,
                       pdf_password_candidates: list = None):
-    """Ingest all supported files in a directory."""
-    files = [
-        os.path.join(input_path, f)
-        for f in sorted(os.listdir(input_path))
-        if Path(f).suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
+    """Ingest all supported files in a directory tree."""
+    files = []
+    for root, _, filenames in os.walk(input_path):
+        root_path = Path(root)
+        for f in sorted(filenames):
+            file_path = root_path / f
+            if file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                files.append(file_path)
     return _run_pipeline(files, out_dir, pdf_password, pdf_password_candidates)
 
 
@@ -124,7 +133,8 @@ def ingest_single(file_path: str, out_dir: str, pdf_password: str = None,
 
 def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
                    pdf_password_candidates: list = None):
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     all_dfs = []
     report_rows = []
 
@@ -134,7 +144,7 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
     print(f"{'='*60}")
 
     for idx, file_path in enumerate(files, 1):
-        fname = os.path.basename(file_path)
+        fname = Path(file_path).name
         print(f"\n  [{idx}/{len(files)}] {fname}")
 
         df, report = ingest_file(file_path, pdf_password, pdf_password_candidates)
@@ -156,20 +166,28 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
         merged = pd.concat(all_dfs, ignore_index=True)
         # Deduplicate on (account_id, date, narration, debit, credit)
         before_dedup = len(merged)
+        duplicate_rows = merged[merged.duplicated(
+            subset=["account_id", "date", "narration", "debit", "credit"],
+            keep="first"
+        )].copy()
         merged = merged.drop_duplicates(
-            subset=["account_id", "date", "narration", "debit", "credit"]
+            subset=["account_id", "date", "narration", "debit", "credit"],
+            keep="first"
         ).reset_index(drop=True)
-        dedup_removed = before_dedup - len(merged)
+        dedup_removed = len(duplicate_rows)
 
-        out_csv = os.path.join(out_dir, "ingested_transactions.csv")
+        out_csv = out_dir / "ingested_transactions.csv"
         merged.to_csv(out_csv, index=False)
+        if not duplicate_rows.empty:
+            dup_csv = out_dir / "removed_duplicate_rows.csv"
+            duplicate_rows.to_csv(dup_csv, index=False)
     else:
         merged = pd.DataFrame()
         dedup_removed = 0
         print("\n  ✗ No data was successfully ingested.")
 
     report_df = pd.DataFrame(report_rows)
-    report_df.to_csv(os.path.join(out_dir, "ingestion_report.csv"), index=False)
+    report_df.to_csv(out_dir / "ingestion_report.csv", index=False)
 
     _print_summary(report_rows, merged, dedup_removed, out_dir)
     return merged, report_df
@@ -205,6 +223,8 @@ def _print_summary(report_rows, merged, dedup_removed, out_dir):
         print(f"Final clean rows    : {len(merged)}")
         print(f"Banks detected      : {', '.join(merged['bank_name'].unique())}")
         print(f"Formats ingested    : {', '.join(merged['source_format'].unique())}")
+        if dedup_removed:
+            print(f"Duplicate rows saved: {os.path.join(out_dir, 'removed_duplicate_rows.csv')}")
     if password_protected:
         print(f"\n  ⚠ These files need a password — re-run with --pdf-password")
         print(f"    or --pdf-passwords to supply one or more candidates:")

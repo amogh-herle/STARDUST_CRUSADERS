@@ -22,11 +22,18 @@ import urllib.request
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from ingestion_config import (
-    COLUMN_ROLE_KEYWORDS, CONTENT_PATTERNS,
-    HINDI_COLUMN_MAP, BANK_NAME_KEYWORDS,
-    DATE_FORMATS, CHANNEL_KEYWORDS,
-)
+try:
+    from phase6.ingestion_config import (
+        COLUMN_ROLE_KEYWORDS, CONTENT_PATTERNS,
+        HINDI_COLUMN_MAP, BANK_NAME_KEYWORDS,
+        DATE_FORMATS, CHANNEL_KEYWORDS,
+    )
+except ImportError:
+    from ingestion_config import (
+        COLUMN_ROLE_KEYWORDS, CONTENT_PATTERNS,
+        HINDI_COLUMN_MAP, BANK_NAME_KEYWORDS,
+        DATE_FORMATS, CHANNEL_KEYWORDS,
+    )
 
 
 # ===========================================================================
@@ -158,10 +165,14 @@ def find_header_row(raw_df: pd.DataFrame, max_scan: int = 20) -> int:
     data_value_cols = sum(1 for c in current_cols if _col_looks_like_data_value(str(c)))
     data_value_ratio = data_value_cols / max(len(current_cols), 1)
     quick_roles = assign_column_roles_by_keywords(current_cols)
-    has_usable_header = bool(
-        quick_roles.get("date")
-        and (quick_roles.get("balance") or quick_roles.get("amount")
-             or quick_roles.get("debit") or quick_roles.get("credit"))
+    has_usable_header = (
+        pd.notna(quick_roles.get("date"))
+        and (
+            pd.notna(quick_roles.get("balance"))
+            or pd.notna(quick_roles.get("amount"))
+            or pd.notna(quick_roles.get("debit"))
+            or pd.notna(quick_roles.get("credit"))
+        )
     )
     if data_value_ratio < 0.4 or has_usable_header:
         return 0

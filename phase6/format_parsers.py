@@ -14,7 +14,7 @@ Bank coverage:
   JSON / TSV: generic
 """
 
-import io, os, re
+import io, os, re, shutil
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -32,7 +32,10 @@ def _read_text_lines(path, n=25):
     return []
 
 def _all_col_keywords():
-    from ingestion_config import COLUMN_ROLE_KEYWORDS
+    try:
+        from phase6.ingestion_config import COLUMN_ROLE_KEYWORDS
+    except ImportError:
+        from ingestion_config import COLUMN_ROLE_KEYWORDS
     kws = set()
     for lst in COLUMN_ROLE_KEYWORDS.values():
         kws.update(k.lower() for k in lst)
@@ -98,6 +101,10 @@ def parse_xlsx(file_path):
             str(v) for row in raw.values
             for v in row if pd.notna(v) and str(v) != "nan"
         )
+    except ImportError as e:
+        warnings.append(f"Excel header scan import failed: {e}")
+        header_text = ""
+        raw = pd.DataFrame()
     except Exception as e:
         warnings.append(f"Excel header scan error: {e}")
         header_text = ""
@@ -124,11 +131,15 @@ def parse_xlsx(file_path):
                 except TypeError:
                     # Older/newer pandas may not accept skip_blank_lines for read_excel
                     df = pd.read_excel(file_path, header=hrow, dtype=str, **kw)
+                except ImportError as e:
+                    warnings.append(f"Excel read engine import failed: {e}")
+                    continue
 
                 if (len(df.columns) >= 4 and
                         not all(str(c).startswith("Unnamed") for c in df.columns)):
                     break
-            except Exception:
+            except Exception as e:
+                warnings.append(f"Excel read error (hrow={hrow}, engine={engine}): {e}")
                 continue
         if df is not None and len(df.columns) >= 4:
             break
@@ -147,8 +158,8 @@ def parse_xlsx(file_path):
 def parse_pdf(file_path, password=None, password_candidates=None):
     try:
         import pdfplumber
-    except ImportError:
-        return pd.DataFrame(), "", "pdf", ["pdfplumber not installed"]
+    except Exception as e:
+        return pd.DataFrame(), "", "pdf", [f"Failed to import pdfplumber: {e}"]
 
     warnings = []
     header_text = ""
@@ -256,7 +267,7 @@ def parse_pdf(file_path, password=None, password_candidates=None):
         warnings.append(f"PDF error: {err}")
 
     if all_rows and headers:
-        df = pd.DataFrame(all_rows, columns=headers).replace("", pd.NA)
+        df = pd.DataFrame(all_rows, columns=headers).replace("", np.nan)
         warnings.append(f"PDF table: {len(df)} rows, {len(headers)} cols "
                         f"(bank={bank_hint})")
         return df, header_text, "pdf", warnings
@@ -292,7 +303,10 @@ def _merge_split_hdrs(hdrs):
     return merged
 
 def _find_hdr_row(rows):
-    from ingestion_config import COLUMN_ROLE_KEYWORDS
+    try:
+        from phase6.ingestion_config import COLUMN_ROLE_KEYWORDS
+    except ImportError:
+        from ingestion_config import COLUMN_ROLE_KEYWORDS
     kws = set(k.lower() for lst in COLUMN_ROLE_KEYWORDS.values() for k in lst)
     best, score = 0, 0
     for i, row in enumerate(rows[:8]):
@@ -347,6 +361,11 @@ def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnin
                 warnings.append("PDF: Bank of Baroda text parser")
                 return df, header_text, "pdf", warnings
 
+        df = _parse_date_amount_lines(all_text_lines, warnings)
+        if not df.empty:
+            warnings.append("PDF: date/amount line parser")
+            return df, header_text, "pdf", warnings
+
         # Layer B: generic word-position
         with pdfplumber.open(file_path) as pdf:
             df = _word_position_parser(pdf, warnings)
@@ -368,11 +387,59 @@ def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnin
             warnings.append("PDF: text-line single-space parser")
             return df, header_text, "pdf", warnings
 
+        # Layer E: scanned PDF OCR fallback
+        ocr_df, ocr_header, ocr_warnings = _pdf_ocr_fallback(file_path, warnings)
+        if not ocr_df.empty:
+            return ocr_df, header_text or ocr_header, "pdf", ocr_warnings
+
         warnings.append("PDF: all fallbacks failed")
         return pd.DataFrame(), header_text, "pdf", warnings
 
     except Exception as e:
         return pd.DataFrame(), header_text, "pdf", warnings + [f"Fallback crash: {e}"]
+
+
+def _pdf_ocr_fallback(file_path, warnings):
+    try:
+        import pytesseract
+        from PIL import Image
+    except Exception as e:
+        return pd.DataFrame(), "", warnings + [f"PDF OCR fallback dependency import failed: {e}"]
+
+    if shutil.which("tesseract") is None:
+        return pd.DataFrame(), "", warnings + [
+            "Tesseract executable not found on PATH. Install tesseract-ocr and ensure it is available in your PATH."
+        ]
+
+    try:
+        import pdfplumber
+    except Exception as e:
+        return pd.DataFrame(), "", warnings + [f"PDF OCR fallback failed to import pdfplumber: {e}"]
+
+    ocr_warnings = list(warnings)
+    page_images = []
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages[:5]:
+                try:
+                    img = page.to_image(resolution=200).original.convert("L")
+                    page_images.append(img)
+                except Exception:
+                    continue
+    except Exception as e:
+        return pd.DataFrame(), "", ocr_warnings + [f"PDF OCR fallback open error: {e}"]
+
+    if not page_images:
+        return pd.DataFrame(), "", ocr_warnings + ["PDF OCR fallback failed: no renderable pages"]
+
+    for img in page_images:
+        df, header_text, source_format, new_warnings = _ocr_image_df(img, ocr_warnings, source_format="pdf")
+        if not df.empty:
+            ocr_warnings = new_warnings
+            ocr_warnings.append("PDF: scanned image OCR parser")
+            return df, header_text, ocr_warnings
+
+    return pd.DataFrame(), "", ocr_warnings + ["PDF OCR fallback failed"]
 
 
 # ── IDFC word-position ────────────────────────────────────────────────────
@@ -577,11 +644,117 @@ def _parse_bob(lines, warnings):
     return pd.DataFrame(rows)
 
 
+def _parse_date_amount_lines(lines, warnings):
+    rows = []
+    header_seen = False
+    amount_re = re.compile(r'^[\d,]+\.\d{2}(?:CR|DR)?$')
+    for raw in lines:
+        line = str(raw).strip()
+        if not line:
+            continue
+        if "Date Tran Ref Num Particulars" in line or "Date Tran Ref" in line:
+            header_seen = True
+            continue
+        if not header_seen:
+            continue
+        if line.startswith("Id Date"):
+            continue
+        if line.startswith("Account Opening balance"):
+            continue
+        if line.startswith("Brought Forward"):
+            continue
+        if line.startswith("Total("):
+            continue
+        if line.startswith("Manager/") or line.startswith("Date :"):
+            continue
+        if line.startswith("***"):
+            continue
+        if line.startswith("Report for the Period") or line.startswith("Service OutLet"):
+            continue
+        if line.startswith("Page") or ("Page" in line and not amount_re.search(line)):
+            continue
+
+        m = re.match(r'^(\d{2}-\d{2}-\d{4})(\S*)\s+(.+)$', line)
+        if not m:
+            continue
+        date, txn_code, rest = m.groups()
+        tokens = re.split(r'\s+', rest)
+        trailing = []
+        while tokens and amount_re.match(tokens[-1]):
+            trailing.insert(0, tokens.pop())
+
+        if len(trailing) < 2:
+            continue
+
+        balance_token = trailing[-1]
+        amount_tokens = trailing[:-1]
+        narration = " ".join(tokens).strip()
+        utr_ref = ""
+        debit = credit = 0.0
+        if len(amount_tokens) == 1:
+            amt_val, amt_sign = _simple_amount_parse(amount_tokens[0])
+            bal_val, bal_sign = _simple_amount_parse(balance_token)
+            if bal_sign == "+":
+                credit = amt_val
+            elif bal_sign == "-":
+                debit = amt_val
+            else:
+                credit = amt_val
+        else:
+            amt1, sign1 = _simple_amount_parse(amount_tokens[-2])
+            amt2, sign2 = _simple_amount_parse(amount_tokens[-1])
+            bal_val, bal_sign = _simple_amount_parse(balance_token)
+            if sign2 or sign1:
+                credit = amt1 if sign2 in ("+", "") else 0.0
+                debit = amt1 if sign2 == "-" else 0.0
+            else:
+                credit = amt2
+
+        if txn_code and txn_code.isalnum() and not txn_code.startswith("0"):
+            utr_ref = txn_code
+            narration = narration
+        rows.append({
+            "date": date,
+            "time": "00:00:00",
+            "narration": narration,
+            "debit": debit,
+            "credit": credit,
+            "balance": balance_token,
+            "utr_ref": utr_ref,
+        })
+
+    if not rows:
+        return pd.DataFrame()
+    warnings.append(f"Date/amount line parser: {len(rows)} txns")
+    return pd.DataFrame(rows)
+
+
+def _simple_amount_parse(val):
+    s = str(val).strip()
+    if not s:
+        return 0.0, ""
+    sign = ""
+    if s.upper().endswith("CR"):
+        sign = "+"
+        s = s[:-2].strip()
+    elif s.upper().endswith("DR"):
+        sign = "-"
+        s = s[:-2].strip()
+    s = s.replace(",", "")
+    try:
+        return float(s), sign
+    except ValueError:
+        return 0.0, sign
+
+
 def _is_valid_transaction_table(df):
     if df.empty:
         return False
     try:
-        from schema_detector import assign_column_roles, parse_date, parse_amount
+        try:
+            from phase6.schema_detector import assign_column_roles, parse_date, parse_amount
+        except ImportError:
+            from schema_detector import assign_column_roles, parse_date, parse_amount
         roles = assign_column_roles(df.columns.tolist(), df=df)
     except Exception:
         return False
@@ -612,7 +785,10 @@ def _is_valid_transaction_table(df):
 
 # ── Generic word-position ─────────────────────────────────────────────────
 def _word_position_parser(pdf, warnings):
-    from ingestion_config import COLUMN_ROLE_KEYWORDS
+    try:
+        from phase6.ingestion_config import COLUMN_ROLE_KEYWORDS
+    except ImportError:
+        from ingestion_config import COLUMN_ROLE_KEYWORDS
     kws = set(k.lower() for lst in COLUMN_ROLE_KEYWORDS.values() for k in lst)
     Y_TOL = 4
     all_rows_by_y = {}
@@ -716,8 +892,13 @@ def parse_image(file_path):
         import pytesseract
         from PIL import Image
         import PIL.ImageEnhance as IE
-    except ImportError:
-        return pd.DataFrame(), "", "image", ["pytesseract/pillow not installed"]
+    except Exception as e:
+        return pd.DataFrame(), "", "image", [f"Failed to import OCR dependencies: {e}"]
+
+    if shutil.which("tesseract") is None:
+        return pd.DataFrame(), "", "image", [
+            "Tesseract executable not found on PATH. Install tesseract-ocr and ensure it is available in your PATH."
+        ]
 
     warnings = []
     try:
@@ -738,6 +919,35 @@ def parse_image(file_path):
     except Exception as e:
         return pd.DataFrame(), "", "image", [f"OCR error: {e}"]
 
+    return _ocr_image_df(img, warnings, source_format="image")
+
+
+def _ocr_image_df(img, warnings, source_format="image"):
+    try:
+        import pytesseract
+        from PIL import Image, ImageEnhance as IE
+    except Exception as e:
+        return pd.DataFrame(), "", source_format, warnings + [f"OCR helper import failed: {e}"]
+
+    if shutil.which("tesseract") is None:
+        return pd.DataFrame(), "", source_format, warnings + [
+            "Tesseract executable not found on PATH. Install tesseract-ocr and ensure it is available in your PATH."
+        ]
+
+    w,h = img.size
+    scale = max(1, 2400//max(w,1))
+    if scale > 1:
+        img = img.resize((w*scale, h*scale), Image.LANCZOS)
+    img = IE.Contrast(img).enhance(1.5)
+    img = IE.Sharpness(img).enhance(2.0)
+    tsv = pytesseract.image_to_data(
+        img, config="--psm 6 --oem 3",
+        output_type=pytesseract.Output.DATAFRAME
+    )
+    raw_text = pytesseract.image_to_string(img, config="--psm 6 --oem 3")
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    header_text = " ".join(lines[:5])
+
     df = _ocr_bbox_df(tsv, warnings)
     if df.empty and lines:
         warnings.append("OCR bbox failed → text-line fallback")
@@ -746,7 +956,7 @@ def parse_image(file_path):
         df = _text_line_df(lines, double_space=False)
     if df.empty:
         warnings.append("OCR: no parseable table found")
-    return df, header_text, "image", warnings
+    return df, header_text, source_format, warnings
 
 
 def _ocr_bbox_df(tsv, warnings):
@@ -849,6 +1059,47 @@ def parse_json(file_path):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TXT
+# ══════════════════════════════════════════════════════════════════════════════
+def parse_txt(file_path):
+    warnings = []
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = [line.rstrip("\n") for line in f]
+    except Exception as e:
+        return pd.DataFrame(), "", "txt", [f"TXT read error: {e}"]
+
+    if not lines:
+        return pd.DataFrame(), "", "txt", ["TXT file is empty"]
+
+    sample = "\n".join(lines[:20])
+    if "\t" in sample or "|" in sample or ("," in sample and sample.count(",") > sample.count(" ")):
+        df, header_text, source_format, parse_warnings = parse_tsv(file_path)
+        warnings.extend(parse_warnings)
+        if not df.empty:
+            warnings.insert(0, "TXT delimiter parser")
+            return df, header_text, "txt", warnings
+
+    nonblank = [line.rstrip() for line in lines if line.strip()]
+    if not nonblank:
+        return pd.DataFrame(), "", "txt", ["TXT file contains only blank lines"]
+
+    df = _text_line_df(nonblank, double_space=True)
+    if not df.empty:
+        warnings.append("TXT: fixed-width text parser")
+        return df, "", "txt", warnings
+
+    df = _text_line_df(nonblank, double_space=False)
+    if not df.empty:
+        warnings.append("TXT: single-space text parser")
+        return df, "", "txt", warnings
+
+    df, header_text, source_format, parse_warnings = parse_tsv(file_path)
+    warnings.extend(parse_warnings)
+    warnings.append("TXT: all text fallbacks failed, attempted delimiter parse")
+    return df, header_text, "txt", warnings
+
+
 # TSV / pipe
 # ══════════════════════════════════════════════════════════════════════════════
 def parse_tsv(file_path):

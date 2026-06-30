@@ -15,18 +15,34 @@ New in v2:
 import os
 import re
 import pandas as pd
-from ingestion_config import (
-    UNIFIED_SCHEMA,
-    PAYTM_DRCR_COL, PAYTM_FROM_COL, PAYTM_TO_COL, PAYTM_AMOUNT_COL,
-    BOB_BENEF_ACCT_COL, BOB_BENEF_IFSC_COL, BOB_BENEF_NAME_COL,
-)
-from schema_detector import (
-    detect_bank, find_header_row, assign_column_roles,
-    assign_column_roles_by_keywords,
-    compute_running_balance, parse_date, parse_amount,
-    infer_channel, extract_counterparty,
-    extract_counterparty_account, extract_counterparty_ifsc,
-)
+try:
+    from phase6.ingestion_config import (
+        UNIFIED_SCHEMA,
+        PAYTM_DRCR_COL, PAYTM_FROM_COL, PAYTM_TO_COL, PAYTM_AMOUNT_COL,
+        BOB_BENEF_ACCT_COL, BOB_BENEF_IFSC_COL, BOB_BENEF_NAME_COL,
+    )
+except ImportError:
+    from ingestion_config import (
+        UNIFIED_SCHEMA,
+        PAYTM_DRCR_COL, PAYTM_FROM_COL, PAYTM_TO_COL, PAYTM_AMOUNT_COL,
+        BOB_BENEF_ACCT_COL, BOB_BENEF_IFSC_COL, BOB_BENEF_NAME_COL,
+    )
+try:
+    from phase6.schema_detector import (
+        detect_bank, find_header_row, assign_column_roles,
+        assign_column_roles_by_keywords,
+        compute_running_balance, parse_date, parse_amount,
+        infer_channel, extract_counterparty,
+        extract_counterparty_account, extract_counterparty_ifsc,
+    )
+except ImportError:
+    from schema_detector import (
+        detect_bank, find_header_row, assign_column_roles,
+        assign_column_roles_by_keywords,
+        compute_running_balance, parse_date, parse_amount,
+        infer_channel, extract_counterparty,
+        extract_counterparty_account, extract_counterparty_ifsc,
+    )
 
 
 def normalize(
@@ -52,6 +68,15 @@ def normalize(
             raw_df = raw_df.iloc[header_row_idx + 1:].copy()
             raw_df.columns = new_cols
             raw_df = raw_df.reset_index(drop=True)
+
+    # Normalize embedded newlines in headers and cell values (fix PDFs with split cells)
+    raw_df.columns = [str(c).replace('\n', ' ').strip() for c in raw_df.columns]
+    # Clean cell values per-column (avoid applymap issues on some pandas builds)
+    for c in raw_df.columns:
+        try:
+            raw_df[c] = raw_df[c].astype(str).str.replace('\n', ' ').str.replace(r'-\s+', '-', regex=True).str.replace(r'\s+-\s+', '-', regex=True).str.replace(r'\s+', ' ', regex=True).str.strip()
+        except Exception:
+            raw_df[c] = raw_df[c].astype(str).map(lambda v: str(v).replace('\n', ' ').replace(' - ', '-').replace('- ', '-').replace(' -', '-').strip())
 
     raw_df = raw_df.dropna(how="all").reset_index(drop=True)
     raw_df = raw_df.loc[:, raw_df.notna().any()]
