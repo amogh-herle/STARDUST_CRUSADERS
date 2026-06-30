@@ -1,0 +1,95 @@
+{
+  "transaction_level": {
+    "total_transactions": 121198,
+    "fraud_transactions_actual": 84,
+    "flagged_by_model": 606,
+    "true_positives": 28,
+    "false_positives": 578,
+    "true_negatives": 120536,
+    "false_negatives": 56,
+    "precision": 0.0462,
+    "recall": 0.3333,
+    "f1_score": 0.0812,
+    "roc_auc": 0.9943,
+    "average_precision": 0.0538,
+    "fraud_caught_pct": 33.33,
+    "false_alarm_rate": 0.48
+  },
+  "account_level": {
+    "total_accounts": 500,
+    "fraud_accounts_actual": 30,
+    "fraud_accounts_detected": 14,
+    "fraud_accounts_missed": 16,
+    "legit_accounts_falsely_flagged": 254,
+    "account_precision": 0.0522,
+    "account_recall": 0.4667,
+    "account_f1": 0.094,
+    "accounts_caught_pct": 46.67
+  },
+  "fraud_rings": [
+    {
+      "fraud_ring_id": "RING000",
+      "total_accounts": 3,
+      "detected": 3,
+      "avg_max_score": 0.8867333333333334,
+      "roles": "fresh_layering_node",
+      "detection_rate_pct": 100.0
+    },
+    {
+      "fraud_ring_id": "RING001",
+      "total_accounts": 9,
+      "detected": 4,
+      "avg_max_score": 0.8331777777777778,
+      "roles": "mule, collector",
+      "detection_rate_pct": 44.4
+    },
+    {
+      "fraud_ring_id": "RING002",
+      "total_accounts": 7,
+      "detected": 4,
+      "avg_max_score": 0.8309,
+      "roles": "mule, collector",
+      "detection_rate_pct": 57.1
+    },
+    {
+      "fraud_ring_id": "RING003",
+      "total_accounts": 11,
+      "detected": 3,
+      "avg_max_score": 0.7894181818181818,
+      "roles": "mule, collector",
+      "detection_rate_pct": 27.3
+    }
+  ],
+  "persona_fp_rates": [
+    {
+      "persona": "business",
+      "total": 44,
+      "flagged": 0,
+      "false_positive_rate_pct": 0.0
+    },
+    {
+      "persona": "family",
+      "total": 104,
+      "flagged": 78,
+      "false_positive_rate_pct": 75.0
+    },
+    {
+      "persona": "salaried",
+      "total": 172,
+      "flagged": 169,
+      "false_positive_rate_pct": 98.3
+    },
+    {
+      "persona": "shopkeeper",
+      "total": 56,
+      "flagged": 2,
+      "false_positive_rate_pct": 3.6
+    },
+    {
+      "persona": "student",
+      "total": 94,
+      "flagged": 5,
+      "false_positive_rate_pct": 5.3
+    }
+  ]
+}
