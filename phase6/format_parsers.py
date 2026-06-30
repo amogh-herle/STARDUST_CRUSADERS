@@ -227,20 +227,24 @@ def parse_pdf(file_path, password=None, password_candidates=None):
                 for table in tables:
                     if not table:
                         continue
-                    if headers is None and len(table) < 2:
-                        continue
-                    if headers is not None and len(table[0]) != n_cols:
-                        continue
-                    if headers is None and not _is_txn_table(table):
-                        continue
 
                     cleaned = [
-                        [str(c).strip() if c is not None else ""
-                         for c in row]
+                        [
+                            re.sub(r'\s+', ' ', re.sub(r'\s+-\s+', '-', re.sub(r'-\s+', '-', str(c).replace('\n', ' ')))).strip()
+                            if c is not None else ""
+                            for c in row
+                        ]
                         for row in table
                         if any(str(c).strip() for c in row if c is not None)
                     ]
                     if not cleaned:
+                        continue
+
+                    if headers is None and len(cleaned) < 2:
+                        continue
+                    if headers is not None and len(cleaned[0]) != n_cols:
+                        continue
+                    if headers is None and not _is_txn_table(cleaned):
                         continue
 
                     if headers is None:
