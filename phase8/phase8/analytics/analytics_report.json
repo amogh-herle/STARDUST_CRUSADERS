@@ -1,5 +1,5 @@
 {
-  "run_timestamp": "2026-06-30T20:46:51.454676",
+  "run_timestamp": "2026-07-01T17:27:46.163744",
   "input_file": "cleaned_transactions.csv",
   "rows_input": 14484,
   "accounts": 19,
@@ -13,6 +13,8 @@
     "weakly_connected_comps": 9,
     "density": 8.8e-05
   },
+  "communities": 16,
+  "scc_components_with_cycles": 0,
   "round_trips": 6,
   "layering_chains": 0,
   "fan_in": 15,
@@ -21,8 +23,8 @@
   "odd_hours": 0,
   "accounts_scored": 19,
   "critical_accounts": 0,
-  "high_accounts": 0,
-  "medium_accounts": 6,
+  "high_accounts": 2,
+  "medium_accounts": 4,
   "trail_manifest": [
     {
       "account": "99572217148131",
@@ -105,6 +107,7 @@
       "file": "trail_17771917925_backward.csv"
     }
   ],
+  "communities_risk_count": 16,
   "rows_output": 14484,
   "total_flagged_rows": 4366
 }

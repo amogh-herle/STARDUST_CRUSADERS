@@ -1,6 +1,6 @@
 ======================================================================
 PHASE 8 — INVESTIGATION ANALYTICS SUMMARY
-Run at : 2026-06-30T20:46:51.454676
+Run at : 2026-07-01T17:27:46.163744
 Input  : cleaned_transactions.csv
 ======================================================================
 
@@ -28,17 +28,17 @@ PATTERN DETECTION RESULTS
 RISK SCORE DISTRIBUTION
 ----------------------------------------
   CRITICAL (≥75)          : 0
-  HIGH     (≥50)          : 0
-  MEDIUM   (≥25)          : 6
+  HIGH     (≥50)          : 2
+  MEDIUM   (≥25)          : 4
   LOW      (<25)          : 13
 
 TOP 10 HIGHEST-RISK ACCOUNTS
 ----------------------------------------
-  [MEDIUM  ] 99572217148131 Score: 32.6  Indian
+  [HIGH    ] 99572217148131 Score: 32.6  Indian
              Patterns : ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
              Reasoning: Round-trip indicators present (0.77 intensity) | Collector behaviour: 14 senders | Distributor behav
 
-  [MEDIUM  ] 18306700003  Score: 32.2  nan
+  [HIGH    ] 18306700003  Score: 32.2  nan
              Patterns : ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
              Reasoning: Round-trip indicators present (0.39 intensity) | Collector behaviour: 33 senders | Distributor behav
 
@@ -86,6 +86,7 @@ ROUND-TRIP DETAIL
 OUTPUT FILES
 ----------------------------------------
   account_graph.pkl            ← NetworkX DiGraph → feed directly to Phase 9
+  account_graph.gexf           ← export for graph visualization tools
   analytics_transactions.csv   ← all rows + Phase 8 flags → Feed to Phase 9/10
   round_trips.csv              ← round-trip findings
   layering_chains.csv          ← layering chain findings
@@ -95,6 +96,7 @@ OUTPUT FILES
   odd_hours.csv                ← odd-hour findings
   beneficiaries.csv            ← beneficiary profiles per account
   risk_scores.csv              ← per-account risk score, tier, reasoning
+  community_risk.csv           ← aggregated community risk summaries
   graph_metrics.csv            ← PageRank / betweenness / degree features
   money_trails/                ← forward/backward fund traces for top accounts
   graph_summary.json           ← graph statistics

@@ -1,16 +1,18 @@
 """
-Phase 7 — Validator
+Phase 7 — Validator  (v2)
 
-Six passes in sequence. Every pass appends to clean_flags and also
-appends a row to the ACTION LOG so there is a complete per-row audit
+Eight passes in sequence (up from six). Every pass appends to clean_flags
+and appends a row to the ACTION LOG so there is a complete per-row audit
 trail of exactly what was done and why.
 
-  Pass 1 : Date validation          — null, bad format, out-of-range
-  Pass 2 : Amount cleaning          — brackets, CR/DR, lakh commas, currency
+  Pass 1 : Date validation          — multi-format parse + canonicalise
+  Pass 2 : Amount cleaning          — brackets, CR/DR, lakh/crore, currency
   Pass 3 : Balance continuity       — tamper detection (forensic priority)
-  Pass 4 : Statistical outliers     — per-account IQR, not global threshold
-  Pass 5 : Velocity flagging        — N+ debits in a short window (fraud signal)
-  Pass 6 : Narration / channel      — OCR noise strip, canonical channel names
+  Pass 4 : Counterparty validation  — self-transfers, malformed IFSC (new)
+  Pass 5 : Statistical outliers     — per-account IQR, not global threshold
+  Pass 6 : Velocity flagging        — N+ debits in a short window
+  Pass 7 : Narration / channel      — OCR noise strip, canonical channel names
+  Pass 8 : Narration integrity      — empty/near-empty narration flag (new)
 
 Nothing is silently dropped. Every modification is logged.
 The action log is returned to clean.py and written to all_actions.csv.
@@ -22,22 +24,36 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 from cleaning_config import (
-    DATE_FORMAT, DATE_VALID_YEAR_MIN, DATE_VALID_YEAR_MAX,
+    DATE_FORMATS_ACCEPTED, DATE_FORMAT_CANONICAL,
+    DATE_VALID_YEAR_MIN, DATE_VALID_YEAR_MAX,
     AMOUNT_BRACKET_NEGATIVE, AMOUNT_STRIP_CURRENCY, AMOUNT_HANDLE_CR_DR,
+    AMOUNT_HANDLE_LAKH_WORDS, CURRENCY_SYMBOLS, LAKH_CRORE_MULTIPLIERS,
     BALANCE_TOLERANCE, BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD,
     OUTLIER_IQR_MULTIPLIER, OUTLIER_MIN_TXN_COUNT,
     VELOCITY_WINDOW_MINUTES, VELOCITY_MIN_TXNS, VELOCITY_MIN_AMOUNT,
-    NARRATION_STRIP_CHARS, CHANNEL_NORMALISE,
+    FLAG_SELF_TRANSFER_SAME_ACCOUNT, FLAG_MALFORMED_IFSC,
+    NARRATION_STRIP_CHARS, NARRATION_MIN_LEN_FLAG, CHANNEL_NORMALISE,
 )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 1 — Date Validation
+# Pass 1 — Date Validation  (multi-format, canonicalises to YYYY-MM-DD)
 # ─────────────────────────────────────────────────────────────────────────────
 def validate_dates(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
-    report = {"null_dates": 0, "bad_format_dates": 0, "out_of_range_dates": 0}
-    flags  = [""] * len(df)
+    """
+    Phase 6 v2's normalizer should already emit YYYY-MM-DD, but this pass
+    is defensive: it accepts any format in DATE_FORMATS_ACCEPTED and
+    rewrites the column to the canonical form, so a format drift upstream
+    (e.g. a new bank parser that forgot to canonicalise) doesn't silently
+    break every downstream date comparison in Phase 8/9/10.
+    """
+    report = {
+        "null_dates": 0, "bad_format_dates": 0, "out_of_range_dates": 0,
+        "reformatted_dates": 0,
+    }
+    flags   = [""] * len(df)
     actions = []
+    df = df.copy()
 
     for i, val in enumerate(df["date"]):
         s = str(val).strip() if pd.notna(val) else ""
@@ -48,40 +64,73 @@ def validate_dates(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
                 "Date column is empty — row kept but date-dependent checks skipped"))
             continue
 
-        try:
-            parsed = datetime.strptime(s, DATE_FORMAT)
-            if not (DATE_VALID_YEAR_MIN <= parsed.year <= DATE_VALID_YEAR_MAX):
-                flags[i] = _add(flags[i], "DATE_OUT_OF_RANGE")
-                report["out_of_range_dates"] += 1
-                actions.append(_action(df, i, "DATE_OUT_OF_RANGE",
-                    f"Date {s} is outside valid range "
-                    f"{DATE_VALID_YEAR_MIN}–{DATE_VALID_YEAR_MAX}"))
-        except ValueError:
+        parsed, matched_fmt = _parse_any_date(s)
+
+        if parsed is None:
             flags[i] = _add(flags[i], "BAD_DATE_FORMAT")
             report["bad_format_dates"] += 1
             actions.append(_action(df, i, "BAD_DATE_FORMAT",
-                f"'{s}' could not be parsed as YYYY-MM-DD"))
+                f"'{s}' could not be parsed with any known format"))
+            continue
 
-    df = df.copy()
+        if not (DATE_VALID_YEAR_MIN <= parsed.year <= DATE_VALID_YEAR_MAX):
+            flags[i] = _add(flags[i], "DATE_OUT_OF_RANGE")
+            report["out_of_range_dates"] += 1
+            actions.append(_action(df, i, "DATE_OUT_OF_RANGE",
+                f"Date {s} is outside valid range "
+                f"{DATE_VALID_YEAR_MIN}–{DATE_VALID_YEAR_MAX}"))
+
+        canonical = parsed.strftime(DATE_FORMAT_CANONICAL)
+        if canonical != s:
+            df.iat[i, df.columns.get_loc("date")] = canonical
+            report["reformatted_dates"] += 1
+            actions.append(_action(df, i, "DATE_REFORMATTED",
+                f"'{s}' (matched {matched_fmt}) → '{canonical}'"))
+
     df["_date_flags"] = flags
     return df, report, actions
 
 
+def _parse_any_date(s: str):
+    """Try every accepted format; return (datetime, format_string) or (None, None)."""
+    for fmt in DATE_FORMATS_ACCEPTED:
+        try:
+            return datetime.strptime(s, fmt), fmt
+        except ValueError:
+            continue
+    # Last resort: pandas' flexible parser (handles ISO timestamps etc.)
+    try:
+        ts = pd.to_datetime(s, errors="raise")
+        return ts.to_pydatetime(), "pandas_flexible"
+    except Exception:
+        return None, None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 2 — Amount Cleaning
+# Pass 2 — Amount Cleaning  (now handles lakh/crore word amounts too)
 # ─────────────────────────────────────────────────────────────────────────────
 def clean_amounts(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
-    report  = {"amount_corrections": 0, "zero_debit_credit_rows": 0}
+    report  = {
+        "amount_corrections":     0,
+        "zero_debit_credit_rows": 0,
+        "lakh_crore_conversions": 0,
+    }
     actions = []
     df      = df.copy()
 
     for col in ("debit", "credit", "balance"):
         for i, val in enumerate(df[col]):
-            original   = _safe_float(val)
-            cleaned    = _parse_amount_cell(val)
-            df.at[df.index[i], col] = cleaned
-            if abs(cleaned - original) > 1e-6 and not (
-                original == 0.0 and str(val).strip() in ("", "-", "nil", "n/a", "nan", None)
+            original = _safe_float(val)
+            cleaned, was_lakh = _parse_amount_cell(val)
+            df.iat[i, df.columns.get_loc(col)] = cleaned
+
+            if was_lakh:
+                report["lakh_crore_conversions"] += 1
+                actions.append(_action(df, i, f"LAKH_CRORE_CONVERTED_{col.upper()}",
+                    f"{col}: '{val}' → {cleaned} (word-multiplier expanded)"))
+            elif abs(cleaned - original) > 1e-6 and not (
+                original == 0.0 and str(val).strip().lower() in
+                ("", "-", "--", "nil", "n/a", "nan", "none")
             ):
                 report["amount_corrections"] += 1
                 actions.append(_action(df, i, f"AMOUNT_CORRECTED_{col.upper()}",
@@ -96,20 +145,39 @@ def clean_amounts(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     return df, report, actions
 
 
-def _parse_amount_cell(val) -> float:
+def _parse_amount_cell(val) -> tuple[float, bool]:
+    """Returns (cleaned_amount, was_lakh_crore_word)."""
     if val is None or (isinstance(val, float) and np.isnan(val)):
-        return 0.0
+        return 0.0, False
     s = str(val).strip()
     if s.lower() in ("", "-", "--", "nil", "n/a", "nan", "none"):
-        return 0.0
+        return 0.0, False
 
-    negative = False
+    negative  = False
+    was_lakh  = False
 
     if AMOUNT_BRACKET_NEGATIVE and s.startswith("(") and s.endswith(")"):
         s, negative = s[1:-1], True
 
     if AMOUNT_STRIP_CURRENCY:
-        s = re.sub(r"[₹$£€]|INR|Rs\.?", "", s, flags=re.IGNORECASE).strip()
+        s = re.sub(CURRENCY_SYMBOLS, "", s, flags=re.IGNORECASE).strip()
+
+    if re.match(r"^\s*-", s):
+        negative = True
+
+    # Lakh / Crore word multipliers — checked BEFORE CR/DR suffix stripping
+    # since "2.5 Lakh" must not be confused with a trailing "...akh" eating
+    # into a CR/DR match. Pattern requires the multiplier word to appear
+    # as a whole word, not as a bare 2-letter "Cr" suffix (handled separately).
+    if AMOUNT_HANDLE_LAKH_WORDS:
+        m = re.search(
+            r"([\d,]+\.?\d*)\s*(lakh|lac|crore)\b", s, flags=re.IGNORECASE
+        )
+        if m:
+            base = float(m.group(1).replace(",", ""))
+            mult = LAKH_CRORE_MULTIPLIERS[m.group(2).lower()]
+            val_out = base * mult
+            return (-abs(val_out) if negative else abs(val_out)), True
 
     if AMOUNT_HANDLE_CR_DR:
         su = s.upper()
@@ -118,7 +186,6 @@ def _parse_amount_cell(val) -> float:
         elif re.search(r"(?i)(dr|d)\s*$", su):
             s = re.sub(r"(?i)(dr|d)\s*$", "", s).strip()
             negative = True
-        # Leading CR/DR (some banks prefix)
         if re.search(r"(?i)^\s*(cr|c)\b", s):
             s = re.sub(r"(?i)^\s*(cr|c)\b", "", s).strip()
         elif re.search(r"(?i)^\s*(dr|d)\b", s):
@@ -132,11 +199,11 @@ def _parse_amount_cell(val) -> float:
         s = first + "." + "".join(rest)
 
     if not s:
-        return 0.0
+        return 0.0, False
     try:
-        return -abs(float(s)) if negative else abs(float(s))
+        return (-abs(float(s)) if negative else abs(float(s))), False
     except ValueError:
-        return 0.0
+        return 0.0, False
 
 
 def _safe_float(val) -> float:
@@ -147,7 +214,7 @@ def _safe_float(val) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 3 — Balance Continuity
+# Pass 3 — Balance Continuity  (unchanged logic, richer per-account stats)
 # ─────────────────────────────────────────────────────────────────────────────
 def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     """
@@ -159,7 +226,8 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
         "accounts_checked":       0,
         "accounts_with_breaches": 0,
         "total_breach_rows":      0,
-        "suspect_accounts":       [],
+        "max_single_breach_amt":  0.0,
+        "balance_review_accounts":       [],
     }
     actions = []
     df = df.copy()
@@ -167,18 +235,21 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
 
     for account_id, group in df.groupby("account_id"):
         valid = group[group["date"].notna() & (group["date"] != "")].copy()
-        valid = valid.sort_values(["date", "time"]).reset_index(drop=True)
+        valid = valid.sort_values(["date", "time"])
         if len(valid) < 2:
             continue
 
         report["accounts_checked"] += 1
         breach_indices = []
+        max_diff_this_account = 0.0
 
         for i in range(1, len(valid)):
-            prev_bal  = valid.loc[i - 1, "balance"]
-            curr_bal  = valid.loc[i,     "balance"]
-            debit     = valid.loc[i,     "debit"]
-            credit    = valid.loc[i,     "credit"]
+            prev_row = valid.iloc[i - 1]
+            curr_row = valid.iloc[i]
+            prev_bal = prev_row["balance"]
+            curr_bal = curr_row["balance"]
+            debit    = curr_row["debit"]
+            credit   = curr_row["credit"]
 
             if prev_bal == 0 and curr_bal == 0:
                 continue
@@ -188,8 +259,9 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
             diff     = abs(expected - actual)
 
             if diff > BALANCE_TOLERANCE:
-                idx = valid.index[i]
+                idx = curr_row.name
                 breach_indices.append(idx)
+                max_diff_this_account = max(max_diff_this_account, diff)
                 actions.append(_action(df, idx, "BALANCE_BREACH",
                     f"Expected balance {expected} but got {actual} "
                     f"(diff ₹{diff:.2f}) — possible tamper or OCR error"))
@@ -199,13 +271,17 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
             df.loc[breach_indices, "is_balance_breach"] = True
             report["total_breach_rows"]      += len(breach_indices)
             report["accounts_with_breaches"] += 1
+            report["max_single_breach_amt"]   = max(
+                report["max_single_breach_amt"], max_diff_this_account
+            )
 
             if breach_ratio > BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD:
-                report["suspect_accounts"].append({
+                report["balance_review_accounts"].append({
                     "account_id":   account_id,
                     "breach_ratio": round(breach_ratio, 3),
                     "breach_rows":  len(breach_indices),
                     "total_rows":   len(valid),
+                    "max_breach_amount": round(max_diff_this_account, 2),
                     "severity":     "HIGH" if breach_ratio > 0.5 else "MEDIUM",
                 })
 
@@ -213,7 +289,62 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 4 — Statistical Outlier Flagging
+# Pass 4 — Counterparty Validation  (new — uses Phase 6 v2 counterparty cols)
+# ─────────────────────────────────────────────────────────────────────────────
+def validate_counterparties(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
+    """
+    Phase 6 v2 surfaces counterparty_account and counterparty_ifsc wherever
+    the source statement provided them (Paytm XLSX, BOB/Federal XLSX, etc).
+    Two checks here:
+
+      SELF_TRANSFER  — counterparty_account == account_id. Either a benign
+                        own-account sweep, or (more interesting for an
+                        investigator) a layering hop disguised as a
+                        same-name internal transfer. Flagged, not dropped.
+
+      MALFORMED_IFSC — counterparty_ifsc present but doesn't match the
+                        structural IFSC rule (11 chars, first 4 alpha,
+                        5th char literal '0', last 6 alphanumeric).
+                        Signals OCR corruption or a fabricated reference.
+    """
+    report  = {"self_transfers_flagged": 0, "malformed_ifsc_flagged": 0}
+    actions = []
+    df = df.copy()
+    df["is_self_transfer"]   = False
+    df["is_malformed_ifsc"]  = False
+
+    has_cp_account = "counterparty_account" in df.columns
+    has_cp_ifsc    = "counterparty_ifsc" in df.columns
+
+    ifsc_pattern = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
+
+    if FLAG_SELF_TRANSFER_SAME_ACCOUNT and has_cp_account:
+        cp = df["counterparty_account"].fillna("").astype(str).str.strip()
+        acc = df["account_id"].fillna("").astype(str).str.strip()
+        self_mask = (cp != "") & (cp == acc)
+        df.loc[self_mask, "is_self_transfer"] = True
+        report["self_transfers_flagged"] = int(self_mask.sum())
+        for idx in df.index[self_mask]:
+            actions.append(_action(df, idx, "SELF_TRANSFER",
+                f"counterparty_account equals account_id ({df.loc[idx, 'account_id']}) "
+                f"— same-account transfer, review for disguised layering hop"))
+
+    if FLAG_MALFORMED_IFSC and has_cp_ifsc:
+        ifsc_vals = df["counterparty_ifsc"].fillna("").astype(str).str.strip().str.upper()
+        present_mask = ifsc_vals != ""
+        malformed_mask = present_mask & ~ifsc_vals.apply(lambda v: bool(ifsc_pattern.match(v)))
+        df.loc[malformed_mask, "is_malformed_ifsc"] = True
+        report["malformed_ifsc_flagged"] = int(malformed_mask.sum())
+        for idx in df.index[malformed_mask]:
+            actions.append(_action(df, idx, "MALFORMED_IFSC",
+                f"counterparty_ifsc '{df.loc[idx, 'counterparty_ifsc']}' does not match "
+                f"the standard IFSC pattern (4 letters + 0 + 6 alphanumeric)"))
+
+    return df, report, actions
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 5 — Statistical Outlier Flagging  (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 def flag_statistical_outliers(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     """
@@ -236,7 +367,7 @@ def flag_statistical_outliers(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, lis
             if len(nonzero) < 4:
                 continue
             q1, q3 = nonzero.quantile(0.25), nonzero.quantile(0.75)
-            iqr    = q3 - q1
+            iqr = q3 - q1
             if iqr == 0:
                 continue
             fence = q3 + OUTLIER_IQR_MULTIPLIER * iqr
@@ -254,14 +385,13 @@ def flag_statistical_outliers(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, lis
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 5 — Velocity Flagging (new)
+# Pass 6 — Velocity Flagging  (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 def flag_velocity_bursts(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     """
     Flag accounts where N+ debit transactions occur within a short window.
-    This is a classic mule account signal — money arrives, then multiple
-    rapid outbound transfers follow within minutes.
-    Requires both date AND time columns to be meaningful.
+    Classic mule account signal — money arrives, then multiple rapid
+    outbound transfers follow within minutes.
     """
     report  = {"velocity_accounts_flagged": 0, "velocity_rows_flagged": 0}
     actions = []
@@ -313,7 +443,7 @@ def flag_velocity_bursts(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 6 — Narration & Channel Normalisation
+# Pass 7 — Narration & Channel Normalisation  (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 def normalise_text_fields(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     report  = {"narrations_cleaned": 0, "channels_normalised": 0}
@@ -347,6 +477,36 @@ def normalise_text_fields(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     for i in df.index[changed_ch]:
         actions.append(_action(df, i, "CHANNEL_NORMALISED",
             f"'{original_channels.iloc[i]}' → '{df.loc[i,'channel']}'"))
+
+    return df, report, actions
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 8 — Narration Integrity  (new)
+# ─────────────────────────────────────────────────────────────────────────────
+def flag_empty_narrations(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
+    """
+    After Pass 7 normalisation, flag rows whose narration is empty or
+    near-empty (below NARRATION_MIN_LEN_FLAG characters). This usually
+    means the source column mapping picked the wrong field or OCR failed
+    to extract anything meaningful — the row is still financially valid
+    (debit/credit/balance present) but lacks the context an investigator
+    needs to understand WHY the money moved.
+    """
+    report  = {"empty_narration_rows": 0}
+    actions = []
+    df = df.copy()
+
+    narr = df["narration"].fillna("").astype(str).str.strip()
+    short_mask = narr.str.len() < NARRATION_MIN_LEN_FLAG
+
+    df["clean_flags"] = df.get("clean_flags", "")
+    for idx in df.index[short_mask]:
+        df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "EMPTY_OR_SHORT_NARRATION")
+        actions.append(_action(df, idx, "EMPTY_OR_SHORT_NARRATION",
+            f"Narration is empty or under {NARRATION_MIN_LEN_FLAG} chars after cleaning "
+            f"— context may be missing for this transaction"))
+    report["empty_narration_rows"] = int(short_mask.sum())
 
     return df, report, actions
 

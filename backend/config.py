@@ -29,9 +29,14 @@ class Settings(BaseSettings):
     PHASE6_INGEST_SCRIPT: str = "../phase6/ingest.py"
     PHASE7_CLEAN_SCRIPT: str = "../phase7/clean.py"
 
-    # LLM (Claude API)
+    # LLM and RAG assistant
+    LLM_PROVIDER: str = "gemini"
+    CHAT_MODEL: str = "gemini-2.5-flash"
+    REPORT_MODEL: str = "gemini-2.5-pro"
+    GEMINI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    CLAUDE_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
-    LLM_MODEL: str = "claude-sonnet-4-6"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

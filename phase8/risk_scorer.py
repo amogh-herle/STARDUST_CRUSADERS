@@ -1,26 +1,15 @@
 """
 Phase 8 — Beneficiary Analysis & Risk Scorer
 
-BENEFICIARY ANALYSIS
-  For each account, profiles every counterparty:
-    - total sent/received
-    - transaction count
-    - first/last seen date
-    - whether it's a new high-value beneficiary (first txn, large amount)
-    - z-score of the transaction amount relative to this account's distribution
-
-RISK SCORER
-  Aggregates all Phase 8 pattern flags + Phase 7 flags into a 0–100
-  risk score per account with a named risk tier (CRITICAL / HIGH / MEDIUM / LOW).
-
-  Weights are defined in analytics_config.RISK_WEIGHTS.
-  Score is NOT a probability — it is an ordinal investigator-priority rank.
-  A CRITICAL account should be investigated first; LOW is routine.
+Risk is an investigator-priority score, not a fraud verdict. It combines
+Phase 8 pattern intensity, Phase 7 data/behaviour flags, beneficiary novelty,
+and NetworkX graph metrics. Amount-dependent features are ratio/rank based.
 """
 
 from __future__ import annotations
-from collections import defaultdict
+from collections import Counter, defaultdict
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 
@@ -28,280 +17,278 @@ from analytics_config import (
     RISK_WEIGHTS, RISK_TIERS,
     BENE_HIGH_VALUE_ZSCORE, BENE_NEW_HIGH_VALUE_RATIO,
     ODD_HOUR_START, ODD_HOUR_END,
+    RISK_TIER_FALLBACK_ENABLED, RISK_TIER_FALLBACK_HIGH, RISK_TIER_FALLBACK_CRITICAL,
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BENEFICIARY ANALYSIS
-# ─────────────────────────────────────────────────────────────────────────────
-
 def analyse_beneficiaries(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Returns a flat DataFrame with one row per (account_id, counterparty)
-    pair, enriched with behavioural statistics.
-
-    This is used by:
-      - The reporting engine (beneficiary table in the investigation report)
-      - The risk scorer (new_high_value_bene flag)
-      - The frontend dashboard (beneficiary explorer panel)
-    """
     records = []
-
-    # Per-account stats for z-score computation
     acct_stats = _compute_account_stats(df)
-
-    # Build per-account first-seen date for each counterparty
-    first_seen: dict[tuple, str] = {}
     debit_df = df[df["debit"] > 0].copy()
     debit_df["_date_parsed"] = pd.to_datetime(debit_df["date"], errors="coerce")
+    debit_df["_counterparty"] = debit_df.apply(_counterparty_identity, axis=1)
+    debit_df = debit_df[debit_df["_counterparty"] != ""]
 
-    for (acc_id, cpname), group in debit_df.groupby(
-        ["account_id", "counterparty_name"], sort=False
-    ):
-        if not cpname or str(cpname).strip() in ("", "nan"):
-            continue
-        first_seen[(acc_id, cpname)] = str(group["_date_parsed"].min().date())
-
-    # Aggregate
-    for (acc_id, cpname), group in debit_df.groupby(
-        ["account_id", "counterparty_name"], sort=False
-    ):
-        if not cpname or str(cpname).strip() in ("", "nan"):
-            continue
-
-        total_sent  = group["debit"].sum()
-        txn_count   = len(group)
-        max_single  = group["debit"].max()
-        last_date   = str(group["_date_parsed"].max().date())
-        f_date      = first_seen.get((acc_id, cpname), "")
-        is_new      = (f_date == last_date) and txn_count == 1  # only ever one txn
-
-        # Z-score of max_single relative to this account's debit distribution
-        acct_mean = acct_stats.get(acc_id, {}).get("debit_mean", 0)
-        acct_std  = acct_stats.get(acc_id, {}).get("debit_std", 1)
-        zscore    = (max_single - acct_mean) / acct_std if acct_std > 0 else 0
-
-        acct_max  = acct_stats.get(acc_id, {}).get("debit_max", 1)
-        new_hv    = is_new and (max_single >= BENE_NEW_HIGH_VALUE_RATIO * acct_max)
-
+    for (acc_id, cp), group in debit_df.groupby(["account_id", "_counterparty"], sort=False):
+        total_sent = group["debit"].sum()
+        txn_count = len(group)
+        max_single = group["debit"].max()
+        first_date = group["_date_parsed"].min()
+        last_date = group["_date_parsed"].max()
+        is_new = txn_count == 1
+        st = acct_stats.get(acc_id, {})
+        mean, std, acct_max = st.get("debit_mean", 0), st.get("debit_std", 1), st.get("debit_max", 1)
+        zscore = (max_single - mean) / std if std > 0 else 0
+        new_hv = is_new and acct_max > 0 and (max_single / acct_max) >= BENE_NEW_HIGH_VALUE_RATIO
         records.append({
-            "account_id":               acc_id,
-            "counterparty_name":        cpname,
-            "total_sent":               round(float(total_sent), 2),
-            "txn_count":                int(txn_count),
-            "max_single_txn":           round(float(max_single), 2),
-            "first_date":               f_date,
-            "last_date":                last_date,
-            "amount_zscore":            round(float(zscore), 3),
-            "is_new_high_value_bene":   bool(new_hv),
-            "is_high_value_bene":       bool(zscore >= BENE_HIGH_VALUE_ZSCORE),
+            "account_id": acc_id,
+            "counterparty_name": cp,
+            "total_sent": round(float(total_sent), 2),
+            "sent_share_of_account": round(float(total_sent / max(st.get("total_debit", total_sent), 1)), 4),
+            "txn_count": int(txn_count),
+            "max_single_txn": round(float(max_single), 2),
+            "first_date": "" if pd.isna(first_date) else str(first_date.date()),
+            "last_date": "" if pd.isna(last_date) else str(last_date.date()),
+            "amount_zscore": round(float(zscore), 3),
+            "is_new_high_value_bene": bool(new_hv),
+            "is_high_value_bene": bool(zscore >= BENE_HIGH_VALUE_ZSCORE),
         })
 
-    bene_df = pd.DataFrame(records) if records else pd.DataFrame(columns=[
-        "account_id", "counterparty_name", "total_sent", "txn_count",
-        "max_single_txn", "first_date", "last_date",
-        "amount_zscore", "is_new_high_value_bene", "is_high_value_bene",
-    ])
+    cols = ["account_id", "counterparty_name", "total_sent", "sent_share_of_account", "txn_count",
+            "max_single_txn", "first_date", "last_date", "amount_zscore",
+            "is_new_high_value_bene", "is_high_value_bene"]
+    bene_df = pd.DataFrame(records, columns=cols)
+    if bene_df.empty:
+        return bene_df
+    return bene_df.sort_values(["account_id", "total_sent"], ascending=[True, False]).reset_index(drop=True)
 
-    return bene_df.sort_values(
-        ["account_id", "total_sent"], ascending=[True, False]
-    ).reset_index(drop=True)
+
+def compute_graph_metrics(account_graph: nx.DiGraph, internal_accounts: set[str]) -> pd.DataFrame:
+    if account_graph is None or account_graph.number_of_nodes() == 0:
+        return pd.DataFrame(columns=["account_id", "pagerank", "betweenness", "in_degree", "out_degree", "degree_centrality", "graph_risk_score"])
+    pr = _weighted_pagerank(account_graph) if account_graph.number_of_edges() else {}
+    if account_graph.number_of_nodes() > 2 and account_graph.number_of_edges() > 0:
+        sample_k = min(200, account_graph.number_of_nodes())
+        btw = nx.betweenness_centrality(account_graph, k=sample_k, weight=None, normalized=True, seed=42)
+    else:
+        btw = {}
+    deg = nx.degree_centrality(account_graph) if account_graph.number_of_nodes() > 1 else {}
+    rows = []
+    raw_scores = []
+    for acc in internal_accounts:
+        in_deg = account_graph.in_degree(acc) if acc in account_graph else 0
+        out_deg = account_graph.out_degree(acc) if acc in account_graph else 0
+        score_raw = pr.get(acc, 0) + btw.get(acc, 0) + deg.get(acc, 0)
+        raw_scores.append(score_raw)
+        rows.append({
+            "account_id": acc,
+            "pagerank": float(pr.get(acc, 0)),
+            "betweenness": float(btw.get(acc, 0)),
+            "in_degree": int(in_deg),
+            "out_degree": int(out_deg),
+            "degree_centrality": float(deg.get(acc, 0)),
+            "_graph_raw": float(score_raw),
+        })
+    if not rows:
+        return pd.DataFrame()
+    max_raw = max(raw_scores) if raw_scores else 0
+    for r in rows:
+        r["graph_risk_score"] = round((r.pop("_graph_raw") / max_raw) if max_raw > 0 else 0.0, 4)
+        r["pagerank"] = round(r["pagerank"], 6)
+        r["betweenness"] = round(r["betweenness"], 6)
+        r["degree_centrality"] = round(r["degree_centrality"], 6)
+    return pd.DataFrame(rows)
+
+
+def compute_risk_scores(
+    df: pd.DataFrame,
+    round_trips: list[dict],
+    layering: list[dict],
+    fan_in: list[dict],
+    fan_out: list[dict],
+    smurfing: list[dict],
+    odd_hours: list[dict],
+    bene_df: pd.DataFrame,
+    account_graph: nx.DiGraph | None = None,
+    member_map: dict[str, int] | None = None,
+) -> pd.DataFrame:
+    accounts = df[["account_id", "account_holder", "bank_name"]].drop_duplicates("account_id").set_index("account_id")
+    internal_accounts = set(accounts.index.astype(str))
+    graph_df = compute_graph_metrics(account_graph, internal_accounts).set_index("account_id") if account_graph is not None else pd.DataFrame()
+
+    rt_counts = Counter([f["account_a"] for f in round_trips] + [f["account_b"] for f in round_trips])
+    lay_counts = Counter(acc for f in layering for acc in f.get("accounts", []))
+    fi_counts = Counter(f["collector"] for f in fan_in)
+    fo_counts = Counter(f["distributor"] for f in fan_out)
+    sm_counts = Counter(f["account"] for f in smurfing)
+    oh_counts = Counter(f["account"] for f in odd_hours)
+
+    nhv_accts = set()
+    if not bene_df.empty and "is_new_high_value_bene" in bene_df.columns:
+        nhv_accts = set(bene_df[bene_df["is_new_high_value_bene"] == True]["account_id"])
+
+    rows = []
+    for acc_id, meta in accounts.iterrows():
+        group = df[df["account_id"] == acc_id]
+        n = max(len(group), 1)
+        intensities = {
+            "round_trip": _count_score(rt_counts[acc_id]),
+            "layering": _count_score(lay_counts[acc_id]),
+            "fan_in": _count_score(fi_counts[acc_id]),
+            "fan_out": _count_score(fo_counts[acc_id]),
+            "smurfing": _count_score(sm_counts[acc_id]),
+            "odd_hour": _count_score(oh_counts[acc_id]),
+            "velocity": _rate_score(group.get("is_velocity_flag", pd.Series(False, index=group.index))),
+            "high_value": _rate_score(group.get("is_high_value_flag", pd.Series(False, index=group.index))),
+            "balance_breach": _rate_score(group.get("is_balance_breach", pd.Series(False, index=group.index))),
+            "new_hv_bene": 1.0 if acc_id in nhv_accts else 0.0,
+            "graph": float(graph_df.loc[acc_id, "graph_risk_score"]) if not graph_df.empty and acc_id in graph_df.index else 0.0,
+        }
+        raw_score = sum(RISK_WEIGHTS.get(k, 0) * v for k, v in intensities.items()) * 100
+        score = min(round(raw_score, 1), 100.0)
+        tier = _score_to_tier(score)
+        flags = {k: v > 0 for k, v in intensities.items() if k != "graph"}
+        active = [k.upper() for k, v in flags.items() if v]
+        if intensities["graph"] >= 0.65:
+            active.append("GRAPH_CENTRAL")
+        gvals = graph_df.loc[acc_id].to_dict() if not graph_df.empty and acc_id in graph_df.index else {}
+        rows.append({
+            "account_id": acc_id,
+            "account_holder": meta.get("account_holder", ""),
+            "bank_name": meta.get("bank_name", ""),
+            "community_id": member_map.get(acc_id) if member_map else None,
+            "risk_score": score,
+            "risk_tier": tier,
+            "flag_round_trip": flags["round_trip"],
+            "flag_layering": flags["layering"],
+            "flag_fan_in": flags["fan_in"],
+            "flag_fan_out": flags["fan_out"],
+            "flag_smurfing": flags["smurfing"],
+            "flag_odd_hour": flags["odd_hour"],
+            "flag_velocity": flags["velocity"],
+            "flag_high_value": flags["high_value"],
+            "flag_balance_breach": flags["balance_breach"],
+            "flag_new_hv_bene": flags["new_hv_bene"],
+            "pagerank": gvals.get("pagerank", 0.0),
+            "betweenness": gvals.get("betweenness", 0.0),
+            "in_degree": gvals.get("in_degree", 0),
+            "out_degree": gvals.get("out_degree", 0),
+            "degree_centrality": gvals.get("degree_centrality", 0.0),
+            "graph_risk_score": gvals.get("graph_risk_score", 0.0),
+            "active_patterns": " | ".join(active) if active else "NONE",
+            "risk_reasoning": _build_reasoning(acc_id, flags, intensities, round_trips, layering, fan_in, fan_out, smurfing, odd_hours),
+        })
+    risk_df = pd.DataFrame(rows).sort_values(["risk_score", "graph_risk_score"], ascending=False).reset_index(drop=True)
+    if RISK_TIER_FALLBACK_ENABLED and not risk_df["risk_tier"].isin(["HIGH", "CRITICAL"]).any():
+        risk_df["risk_tier"] = risk_df["risk_score"].apply(_fallback_tier)
+    return risk_df
+
+
+def _score_to_tier(score: float) -> str:
+    return next(t for t, threshold in sorted(RISK_TIERS.items(), key=lambda x: -x[1]) if score >= threshold)
+
+
+def _fallback_tier(score: float) -> str:
+    if score >= RISK_TIER_FALLBACK_CRITICAL:
+        return "CRITICAL"
+    if score >= RISK_TIER_FALLBACK_HIGH:
+        return "HIGH"
+    return _score_to_tier(score)
+
+
+def _weighted_pagerank(graph: nx.DiGraph, damping: float = 0.85, max_iter: int = 100, tol: float = 1e-9) -> dict:
+    nodes = list(graph.nodes())
+    n = len(nodes)
+    if n == 0:
+        return {}
+    idx = {node: i for i, node in enumerate(nodes)}
+    rank = np.full(n, 1.0 / n)
+    out_weight = np.zeros(n)
+    incoming = [[] for _ in range(n)]
+    for u, v, data in graph.edges(data=True):
+        w = float(data.get("total_amount", 1.0) or 1.0)
+        ui, vi = idx[u], idx[v]
+        out_weight[ui] += w
+        incoming[vi].append((ui, w))
+    teleport = (1.0 - damping) / n
+    for _ in range(max_iter):
+        new_rank = np.full(n, teleport)
+        dangling = rank[out_weight == 0].sum()
+        if dangling:
+            new_rank += damping * dangling / n
+        for vi, inc in enumerate(incoming):
+            acc = 0.0
+            for ui, w in inc:
+                if out_weight[ui] > 0:
+                    acc += rank[ui] * (w / out_weight[ui])
+            new_rank[vi] += damping * acc
+        if np.abs(new_rank - rank).sum() < tol:
+            rank = new_rank
+            break
+        rank = new_rank
+    return {node: float(rank[idx[node]]) for node in nodes}
 
 
 def _compute_account_stats(df: pd.DataFrame) -> dict:
     stats = {}
     for acc_id, group in df[df["debit"] > 0].groupby("account_id"):
-        debits = group["debit"].values
+        debits = group["debit"].astype(float).values
         stats[acc_id] = {
             "debit_mean": float(np.mean(debits)),
-            "debit_std":  float(np.std(debits)) if len(debits) > 1 else 1.0,
-            "debit_max":  float(np.max(debits)),
+            "debit_std": float(np.std(debits)) if len(debits) > 1 else 1.0,
+            "debit_max": float(np.max(debits)),
+            "total_debit": float(np.sum(debits)),
         }
     return stats
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RISK SCORER
-# ─────────────────────────────────────────────────────────────────────────────
-
-def compute_risk_scores(
-    df:             pd.DataFrame,
-    round_trips:    list[dict],
-    layering:       list[dict],
-    fan_in:         list[dict],
-    fan_out:        list[dict],
-    smurfing:       list[dict],
-    odd_hours:      list[dict],
-    bene_df:        pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Returns a DataFrame with one row per account_id:
-        account_id, account_holder, bank_name,
-        risk_score (0–100), risk_tier,
-        flag_round_trip, flag_layering, flag_fan_in, flag_fan_out,
-        flag_smurfing, flag_odd_hour, flag_velocity, flag_high_value,
-        flag_balance_breach, flag_new_hv_bene,
-        active_patterns, risk_reasoning
-    """
-    accounts = df[["account_id", "account_holder", "bank_name"]].drop_duplicates(
-        subset=["account_id"]
-    ).set_index("account_id")
-
-    # Collect which accounts appear in each pattern
-    rt_accts  = {f["account_a"] for f in round_trips} | {f["account_b"] for f in round_trips}
-    lay_accts = {acc for f in layering for acc in f.get("accounts", [])}
-    fi_accts  = {f["collector"] for f in fan_in}
-    fo_accts  = {f["distributor"] for f in fan_out}
-    sm_accts  = {f["account"] for f in smurfing}
-    oh_accts  = {f["account"] for f in odd_hours}
-
-    # Phase 7 per-account flag rates
-    vel_accts  = set(df[df["is_velocity_flag"]  == True]["account_id"])
-    hv_accts   = set(df[df["is_high_value_flag"] == True]["account_id"])
-    bb_accts   = set(df[df["is_balance_breach"]  == True]["account_id"])
-
-    # New high-value beneficiary accounts (from beneficiary analysis)
-    nhv_accts = set()
-    if not bene_df.empty and "is_new_high_value_bene" in bene_df.columns:
-        nhv_accts = set(bene_df[bene_df["is_new_high_value_bene"]]["account_id"])
-
-    rows = []
-    for acc_id, meta in accounts.iterrows():
-        flags = {
-            "round_trip":     acc_id in rt_accts,
-            "layering":       acc_id in lay_accts,
-            "fan_in":         acc_id in fi_accts,
-            "fan_out":        acc_id in fo_accts,
-            "smurfing":       acc_id in sm_accts,
-            "odd_hour":       acc_id in oh_accts,
-            "velocity":       acc_id in vel_accts,
-            "high_value":     acc_id in hv_accts,
-            "balance_breach": acc_id in bb_accts,
-        }
-
-        # Weighted score (each flag contributes its weight × 100 to the score)
-        raw_score = sum(
-            RISK_WEIGHTS.get(k, 0) * 100
-            for k, v in flags.items() if v
-        )
-        # New HV beneficiary adds a small bonus
-        if acc_id in nhv_accts:
-            raw_score += 5
-
-        score = min(round(raw_score, 1), 100.0)
-
-        tier = "LOW"
-        for t, threshold in sorted(RISK_TIERS.items(), key=lambda x: -x[1]):
-            if score >= threshold:
-                tier = t
-                break
-
-        active = [k.upper() for k, v in flags.items() if v]
-        if acc_id in nhv_accts:
-            active.append("NEW_HV_BENE")
-
-        reasoning = _build_reasoning(acc_id, flags, acc_id in nhv_accts,
-                                      round_trips, layering, fan_in,
-                                      fan_out, smurfing, odd_hours)
-
-        rows.append({
-            "account_id":         acc_id,
-            "account_holder":     meta.get("account_holder", ""),
-            "bank_name":          meta.get("bank_name", ""),
-            "risk_score":         score,
-            "risk_tier":          tier,
-            "flag_round_trip":    flags["round_trip"],
-            "flag_layering":      flags["layering"],
-            "flag_fan_in":        flags["fan_in"],
-            "flag_fan_out":       flags["fan_out"],
-            "flag_smurfing":      flags["smurfing"],
-            "flag_odd_hour":      flags["odd_hour"],
-            "flag_velocity":      flags["velocity"],
-            "flag_high_value":    flags["high_value"],
-            "flag_balance_breach":flags["balance_breach"],
-            "flag_new_hv_bene":   acc_id in nhv_accts,
-            "active_patterns":    " | ".join(active) if active else "NONE",
-            "risk_reasoning":     reasoning,
-        })
-
-    risk_df = pd.DataFrame(rows).sort_values(
-        "risk_score", ascending=False
-    ).reset_index(drop=True)
-
-    return risk_df
+def _counterparty_identity(row) -> str:
+    for col in ("counterparty_account", "counterparty_name"):
+        val = row.get(col, "")
+        if pd.isna(val):
+            continue
+        s = str(val).strip()
+        if s and s.lower() not in {"nan", "none", "null"}:
+            return " ".join(s.upper().split())
+    return ""
 
 
-def _build_reasoning(
-    acc_id, flags, is_nhv,
-    round_trips, layering, fan_in, fan_out, smurfing, odd_hours,
-) -> str:
+def _rate_score(series: pd.Series) -> float:
+    vals = series.fillna(False).astype(bool)
+    if len(vals) == 0:
+        return 0.0
+    # sqrt prevents a very large account from dominating only because it has many rows.
+    return min(float(np.sqrt(vals.mean())), 1.0)
+
+
+def _count_score(count: int) -> float:
+    return min(np.log1p(max(count, 0)) / np.log1p(5), 1.0)
+
+
+def _build_reasoning(acc_id, flags, intensities, round_trips, layering, fan_in, fan_out, smurfing, odd_hours) -> str:
     parts = []
-
     if flags["round_trip"]:
-        rt = [f for f in round_trips if acc_id in (f["account_a"], f["account_b"])]
-        if rt:
-            r = rt[0]
-            parts.append(
-                f"Round-trip: ₹{r['outflow_amount']:,.0f} sent to {r['account_b']}, "
-                f"₹{r['return_amount']:,.0f} returned in {r['gap_days']}d"
-            )
-
+        parts.append(f"Round-trip indicators present ({intensities['round_trip']:.2f} intensity)")
     if flags["layering"]:
-        lay = [f for f in layering if acc_id in f.get("accounts", [])]
-        if lay:
-            l = lay[0]
-            parts.append(
-                f"Layering: {l['chain_length']}-hop chain "
-                f"₹{l['start_amount']:,.0f}→₹{l['end_amount']:,.0f}"
-            )
-
+        parts.append("Participates in temporal internal transfer chain")
     if flags["fan_in"]:
-        fi = [f for f in fan_in if f["collector"] == acc_id]
-        if fi:
-            f_ = fi[0]
-            parts.append(
-                f"Fan-in collector: ₹{f_['total_inflow']:,.0f} from "
-                f"{f_['sender_count']} senders"
-            )
-
+        hit = next((f for f in fan_in if f["collector"] == acc_id), None)
+        parts.append(f"Collector behaviour: {hit.get('sender_count')} senders" if hit else "Collector behaviour")
     if flags["fan_out"]:
-        fo = [f for f in fan_out if f["distributor"] == acc_id]
-        if fo:
-            f_ = fo[0]
-            parts.append(
-                f"Fan-out: ₹{f_['total_outflow']:,.0f} to "
-                f"{f_['receiver_count']} receivers"
-            )
-
+        hit = next((f for f in fan_out if f["distributor"] == acc_id), None)
+        parts.append(f"Distributor behaviour: {hit.get('receiver_count')} receivers" if hit else "Distributor behaviour")
     if flags["smurfing"]:
-        sm = [f for f in smurfing if f["account"] == acc_id]
-        if sm:
-            s = sm[0]
-            parts.append(
-                f"Smurfing: {s['txn_count']} structured transfers "
-                f"below ₹{s['threshold_used']:,.0f}, "
-                f"total ₹{s['total_amount']:,.0f}"
-            )
-
+        parts.append("Structured similarly sized transfers relative to own activity")
     if flags["odd_hour"]:
-        oh = [f for f in odd_hours if f["account"] == acc_id]
-        if oh:
-            o = oh[0]
-            parts.append(
-                f"Odd-hour activity: {o['odd_hour_txns']} transactions "
-                f"between {ODD_HOUR_START:02d}:00–{ODD_HOUR_END:02d}:00"
-            )
-
+        parts.append(f"Real timestamped odd-hour activity between {ODD_HOUR_START:02d}:00-{ODD_HOUR_END:02d}:00")
     if flags["velocity"]:
-        parts.append("Velocity burst: rapid successive debits flagged in Phase 7")
+        parts.append("Velocity bursts from Phase 7")
     if flags["high_value"]:
-        parts.append("High-value outlier: IQR outlier flagged in Phase 7")
+        parts.append("Per-account high-value outliers from Phase 7")
     if flags["balance_breach"]:
-        parts.append("Balance breach: statement balance does not reconcile")
-    if is_nhv:
-        parts.append("New high-value beneficiary: first-time large transfer to unknown recipient")
-
-    return " | ".join(parts) if parts else "No suspicious patterns detected"
-
-
-
+        parts.append("Statement balance continuity issues")
+    if flags["new_hv_bene"]:
+        parts.append("New high-value beneficiary")
+    if intensities.get("graph", 0) >= 0.65:
+        parts.append("Graph-central account by PageRank/betweenness/degree")
+    return " | ".join(parts) if parts else "No material analytics patterns detected"

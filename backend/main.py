@@ -28,6 +28,7 @@ from routers.transactions import router as transactions_router
 from routers.graph import router as graph_router
 from routers.investigations import router as investigations_router
 from routers.dashboard import dashboard_router, rings_router
+from routers.assistant import router as assistant_router
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ app.include_router(graph_router,          prefix=PREFIX)
 app.include_router(investigations_router, prefix=PREFIX)
 app.include_router(dashboard_router,      prefix=PREFIX)
 app.include_router(rings_router,          prefix=PREFIX)
+app.include_router(assistant_router,      prefix=PREFIX)
 
 
 # ---------------------------------------------------------------------------

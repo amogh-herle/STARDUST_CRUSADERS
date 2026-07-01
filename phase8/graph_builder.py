@@ -16,6 +16,7 @@ fan-in/out, graph analytics) can share the same object rather than
 rebuilding it each time.
 """
 
+import re
 import pandas as pd
 import networkx as nx
 from datetime import datetime
@@ -51,42 +52,29 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
             is_internal=True,
         )
 
-    # Process transfer edges — only rows that have a counterparty
-    transfer_df = df[
-        df["counterparty_name"].notna() &
-        (df["counterparty_name"].str.strip() != "") &
-        (df["debit"] > 0)
-    ].copy()
+    # Process transfer edges. Prefer counterparty_account for internal linkage;
+    # fall back to normalised counterparty_name for external entities.
+    transfer_df = df[df["debit"] > 0].copy()
 
-    for _, row in transfer_df.iterrows():
-        src  = row["account_id"]
-        dst  = str(row["counterparty_name"]).strip()
-        amt  = float(row["debit"])
-        ts   = _parse_ts(row)
-        utr  = str(row.get("utr_ref", "")).strip()
-        nar  = str(row.get("narration", "")).strip()
+    for row_idx, row in transfer_df.iterrows():
+        src = str(row["account_id"]).strip()
+        dst = _counterparty_identity(row)
+        if not dst:
+            continue
+        amt = float(row["debit"])
+        ts = _parse_ts(row)
+        utr = str(row.get("utr_ref", "")).strip()
+        nar = str(row.get("narration", "")).strip()
         chan = str(row.get("channel", "")).strip()
         date = str(row.get("date", "")).strip()
 
-        # Add counterparty node if not already present
-        # Tag as internal only if it matches a known account_id
         dst_is_internal = dst in internal_ids
         if dst not in txn_graph:
-            txn_graph.add_node(dst,
-                holder=dst,
-                bank="UNKNOWN",
-                is_internal=dst_is_internal,
-            )
+            txn_graph.add_node(dst, holder=dst, bank="UNKNOWN", is_internal=dst_is_internal)
         if dst not in account_graph:
-            account_graph.add_node(dst,
-                holder=dst,
-                bank="UNKNOWN",
-                is_internal=dst_is_internal,
-            )
+            account_graph.add_node(dst, holder=dst, bank="UNKNOWN", is_internal=dst_is_internal)
 
-        # TXN_GRAPH: one edge per transaction
-        txn_graph.add_edge(
-            src, dst,
+        edge_attrs = dict(
             amount=amt,
             timestamp=ts,
             date=date,
@@ -94,20 +82,30 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
             narration=nar,
             channel=chan,
             account_id=src,
+            row_idx=int(row_idx),
+            dst_is_internal=dst_is_internal,
         )
+        txn_graph.add_edge(src, dst, **edge_attrs)
 
-        # ACCOUNT_GRAPH: accumulate total flow
         if account_graph.has_edge(src, dst):
             account_graph[src][dst]["total_amount"] += amt
-            account_graph[src][dst]["txn_count"]    += 1
+            account_graph[src][dst]["txn_count"] += 1
+            account_graph[src][dst]["row_indices"].append(int(row_idx))
         else:
-            account_graph.add_edge(
-                src, dst,
-                total_amount=amt,
-                txn_count=1,
-            )
+            account_graph.add_edge(src, dst, total_amount=amt, txn_count=1, row_indices=[int(row_idx)])
 
     return txn_graph, account_graph
+
+
+def _counterparty_identity(row) -> str:
+    for col in ("counterparty_account", "counterparty_name"):
+        val = row.get(col, "")
+        if pd.isna(val):
+            continue
+        s = str(val).strip()
+        if s and s.lower() not in {"nan", "none", "null"}:
+            return re.sub(r"\s+", " ", s).upper()
+    return ""
 
 
 def _parse_ts(row) -> datetime:
@@ -128,10 +126,16 @@ def _parse_ts(row) -> datetime:
 
 
 def graph_summary(txn_graph: nx.MultiDiGraph, account_graph: nx.DiGraph) -> dict:
+    internal_nodes = [n for n, d in account_graph.nodes(data=True) if d.get("is_internal")]
+    external_nodes = account_graph.number_of_nodes() - len(internal_nodes)
+    density = nx.density(account_graph) if account_graph.number_of_nodes() > 1 else 0.0
     return {
-        "txn_graph_nodes":        txn_graph.number_of_nodes(),
-        "txn_graph_edges":        txn_graph.number_of_edges(),
-        "account_graph_nodes":    account_graph.number_of_nodes(),
-        "account_graph_edges":    account_graph.number_of_edges(),
-        "weakly_connected_comps": nx.number_weakly_connected_components(account_graph),
+        "txn_graph_nodes": txn_graph.number_of_nodes(),
+        "txn_graph_edges": txn_graph.number_of_edges(),
+        "account_graph_nodes": account_graph.number_of_nodes(),
+        "account_graph_edges": account_graph.number_of_edges(),
+        "internal_account_nodes": len(internal_nodes),
+        "external_counterparty_nodes": external_nodes,
+        "weakly_connected_comps": nx.number_weakly_connected_components(account_graph) if account_graph.number_of_nodes() else 0,
+        "density": round(float(density), 6),
     }

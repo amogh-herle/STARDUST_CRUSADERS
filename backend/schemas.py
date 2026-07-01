@@ -256,6 +256,17 @@ class ReportOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AssistantChatRequest(BaseModel):
+    question: str
+    account_id: Optional[str] = None
+    community_id: Optional[str] = None
+
+
+class AssistantChatResponse(BaseModel):
+    answer: str
+    sources: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Dashboard Stats
 # ---------------------------------------------------------------------------
