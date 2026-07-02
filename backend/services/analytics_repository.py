@@ -141,7 +141,7 @@ class AnalyticsRepository:
         return row.iloc[0].to_dict() if not row.empty else None
 
     def get_sources(self, account_id: str | None = None, community_id: str | None = None, include_trails: bool = False) -> list[str]:
-        sources = {
+        all_possible = [
             "risk_scores.csv",
             "community_risk.csv",
             "communities.csv",
@@ -149,9 +149,14 @@ class AnalyticsRepository:
             "analytics_report.json",
             "analytics_summary.txt",
             "investigator_case_report.html",
-        }
+        ]
+        sources = set()
+        for filename in all_possible:
+            if (self.analytics_root / filename).exists():
+                sources.add(filename)
         if include_trails and account_id:
             trail_files = self.get_money_trail(account_id).get("files", [])
             for trail in trail_files:
-                sources.add(f"money_trails/{trail['path']}")
+                if (self.analytics_root / "money_trails" / trail['path']).exists():
+                    sources.add(f"money_trails/{trail['path']}")
         return sorted(sources)

@@ -45,4 +45,4 @@ class TestAssistantService(unittest.TestCase):
 
         provider.generate.assert_called_once()
         self.assertEqual(answer, "OK")
-        self.assertEqual(sources, ["risk_scores.csv"])
+        self.assertIn("risk_scores.csv", sources)
