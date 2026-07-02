@@ -19,6 +19,7 @@ New in v2:
 import re
 import json
 import urllib.request
+import warnings as _warnings
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -452,6 +453,13 @@ _OCR_DATE_FIXES = str.maketrans({
     "S": "5", "B": "8",
 })
 
+
+def _clean_datetime_candidate(candidate: str) -> str:
+    candidate = (candidate or "").strip()
+    candidate = re.sub(r"(?<=\d)[A-Z]{2,5}$", "", candidate)
+    candidate = re.sub(r"\s+[A-Z]{2,5}$", "", candidate)
+    return candidate.strip()
+
 # IDFC timestamps embed date+time: "15/05/25 10:20"
 _IDFC_DT_RE = re.compile(
     r"(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\s+\d{1,2}:\d{2}"
@@ -518,8 +526,18 @@ def parse_date(val) -> str:
                 continue
 
     for candidate in (s, s_fixed):
+        candidate = _clean_datetime_candidate(candidate)
+        if not candidate:
+            continue
         try:
-            parsed = pd.to_datetime(candidate, dayfirst=True, errors="coerce", utc=False)
+            # This is the last-resort, "throw anything at pandas" parse —
+            # garbage input (stray OCR/word-position tokens like "5H1V")
+            # is expected and already handled by errors="coerce". Pandas
+            # still warns about its own upcoming timezone-handling change
+            # even in coerce mode, which is just noise here.
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore", FutureWarning)
+                parsed = pd.to_datetime(candidate, dayfirst=True, errors="coerce", utc=False)
         except Exception:
             continue
         if pd.notna(parsed) and 1990 <= parsed.year <= 2100:

@@ -17,6 +17,13 @@ Bank coverage:
 import io, os, re, shutil
 import numpy as np
 import pandas as pd
+
+# Opts into pandas' upcoming replace() behavior so `.replace("", np.nan)`
+# doesn't try (and warn about) an implicit downcast before our explicit
+# `.infer_objects(copy=False)` runs. Purely silences a noisy FutureWarning
+# that fires on every single parsed file — output is unaffected since we
+# already call infer_objects() ourselves right after.
+pd.set_option("future.no_silent_downcasting", True)
 from collections import defaultdict
 
 
@@ -88,15 +95,37 @@ def parse_csv(file_path):
 # ══════════════════════════════════════════════════════════════════════════════
 # XLSX / XLS
 # ══════════════════════════════════════════════════════════════════════════════
+def _detect_excel_engine(file_path):
+    """
+    Some .xls files in this dataset are actually xlsx (zip-based) content
+    that was just saved/exported with a .xls extension. Guessing the
+    engine from the extension makes xlrd fail immediately on those (xlrd
+    2.x deliberately dropped xlsx support) — logging a scary-looking but
+    harmless "not supported" warning on every single one before falling
+    back correctly. Sniffing the real file signature picks the right
+    engine on the first try and removes the warning entirely.
+    """
+    try:
+        with open(file_path, "rb") as fh:
+            sig = fh.read(8)
+        if sig[:4] == b"PK\x03\x04":
+            return "openpyxl"       # real xlsx/zip container
+        if sig[:8] == b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1":
+            return "xlrd"           # real legacy .xls (OLE2/BIFF)
+    except Exception:
+        pass
+    ext = os.path.splitext(file_path)[1].lower()
+    return "xlrd" if ext == ".xls" else "openpyxl"
+
+
 def parse_xlsx(file_path):
     warnings = []
-    ext = os.path.splitext(file_path)[1].lower()
+    engine_guess = _detect_excel_engine(file_path)
 
     # read first 20 rows raw for header detection
     try:
-        engine = "xlrd" if ext == ".xls" else "openpyxl"
         raw = pd.read_excel(file_path, header=None, dtype=str,
-                            nrows=20, engine=engine)
+                            nrows=20, engine=engine_guess)
         header_text = " ".join(
             str(v) for row in raw.values
             for v in row if pd.notna(v) and str(v) != "nan"
@@ -120,7 +149,7 @@ def parse_xlsx(file_path):
 
     df = None
     for hrow in list(dict.fromkeys([best_row, 0, 1, 2, 3])):
-        for engine in (("xlrd" if ext == ".xls" else "openpyxl"), None):
+        for engine in (engine_guess, None):
             try:
                 kw = {"engine": engine} if engine else {}
                 try:
@@ -184,6 +213,7 @@ def parse_pdf(file_path, password=None, password_candidates=None):
 
     all_rows, headers, n_cols = [], None, 0
     all_text_lines = []
+    total_text_chars = 0
 
     STRATEGIES = [
         {"vertical_strategy":"lines","horizontal_strategy":"lines",
@@ -199,30 +229,43 @@ def parse_pdf(file_path, password=None, password_candidates=None):
         with _open() as pdf:
             n_pages = len(pdf.pages)
             text_chunks = []
+            winning_strategy_idx = None  # once a strategy works, try it first on later pages
 
+            # Single pass per page: extract text AND attempt tables together,
+            # then immediately flush pdfplumber's per-page cache (chars,
+            # rects, edges, lines). Without this, a 500-1000 page statement
+            # keeps every page's full layout graph alive in memory for the
+            # whole file — that's the main driver of the RAM blowups on
+            # large PDFs, not worker count.
             for page in pdf.pages:
                 t = page.extract_text() or ""
                 if t:
                     text_chunks.append(t)
                     all_text_lines.extend(t.splitlines())
+                    total_text_chars += len(t)
 
-            header_text = "\n".join(text_chunks)
-            bank_hint = _detect_bank_hint(header_text)
-
-            for page in pdf.pages:
                 tables = []
-                for strat in STRATEGIES:
+                strat_order = STRATEGIES
+                if winning_strategy_idx is not None:
+                    # try the strategy that already worked on this document
+                    # first — most statements are consistent page to page,
+                    # so this normally avoids the other 3 attempts entirely.
+                    strat_order = [STRATEGIES[winning_strategy_idx]] + [
+                        s for i, s in enumerate(STRATEGIES) if i != winning_strategy_idx
+                    ]
+                for strat in strat_order:
                     try:
-                        tables = (page.extract_tables(strat) if strat
-                                  else page.extract_tables())
-                        if tables and any(
-                            t and len(t) >= 1 and len(t[0]) >= 5
-                            for t in tables
+                        candidate = (page.extract_tables(strat) if strat
+                                     else page.extract_tables())
+                        if candidate and any(
+                            t and len(t) >= 1 and len(t[0]) >= 4
+                            for t in candidate
                         ):
+                            tables = candidate
+                            winning_strategy_idx = STRATEGIES.index(strat) if strat else len(STRATEGIES) - 1
                             break
-                        tables = []
                     except Exception:
-                        tables = []
+                        continue
 
                 for table in tables:
                     if not table:
@@ -264,14 +307,32 @@ def parse_pdf(file_path, password=None, password_candidates=None):
                             row += [""] * (n_cols - len(row))
                         all_rows.append(row[:n_cols])
 
+                # Release this page's cached geometry now that we're done
+                # with it — critical for large multi-hundred-page PDFs.
+                try:
+                    page.flush_cache()
+                except Exception:
+                    pass
+
+            header_text = "\n".join(text_chunks)
+            bank_hint = _detect_bank_hint(header_text)
+
     except Exception as e:
         err = str(e)
         if "PASSWORD_PROTECTED" in err:
             return pd.DataFrame(), header_text, "pdf", [err]
         warnings.append(f"PDF error: {err}")
+        # text_chunks may hold partial progress if the exception hit
+        # mid-document (e.g. a bad page later in a huge PDF) — use it.
+        try:
+            if not header_text and text_chunks:
+                header_text = "\n".join(text_chunks)
+        except NameError:
+            pass
+        bank_hint = _detect_bank_hint(header_text)
 
     if all_rows and headers:
-        df = pd.DataFrame(all_rows, columns=headers).replace("", np.nan)
+        df = pd.DataFrame(all_rows, columns=headers).replace("", np.nan).infer_objects(copy=False)
         if _is_valid_transaction_table(df):
             warnings.append(f"PDF table: {len(df)} rows, {len(headers)} cols "
                             f"(bank={bank_hint})")
@@ -283,9 +344,18 @@ def parse_pdf(file_path, password=None, password_candidates=None):
 
     # ── fallback cascade ──────────────────────────────────────────────────
     warnings.append("No tables — trying text fallbacks")
+    # A page is only worth OCR'ing if it doesn't already have a usable text
+    # layer. Real digital statements average hundreds of chars/page here;
+    # true scans average close to 0. This avoids burning 10-25+s per file
+    # rendering-and-OCR'ing pages that already parsed fine as text and
+    # were just an unusual table layout (this was silently discarding
+    # files as "no rows found" purely because OCR fallback timed out or
+    # produced garbage on a perfectly good digital PDF).
+    avg_chars_per_page = (total_text_chars / n_pages) if n_pages else 0
+    likely_scanned = avg_chars_per_page < 40
     return _pdf_text_fallback(
         file_path, header_text, bank_hint,
-        all_text_lines, warnings
+        all_text_lines, warnings, allow_ocr=likely_scanned
     )
 
 
@@ -297,6 +367,8 @@ def _detect_bank_hint(text):
     if "bank of baroda" in tl or "barb" in tl:    return "bob"
     if "bandhan" in tl:                            return "bandhan"
     if "federal bank" in tl:                       return "federal"
+    if "kerala gramin" in tl or "kerala grameena" in tl or "kerala gramin bank" in tl:
+        return "kerala_gramin"
     return "generic"
 
 def _merge_split_hdrs(hdrs):
@@ -333,17 +405,27 @@ def _is_txn_table(table):
 
 # ── PDF fallbacks ─────────────────────────────────────────────────────────
 
-def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnings):
+def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnings, allow_ocr=True):
     try:
         import pdfplumber
 
-        # collect words per page
+        # page_words (word-level bbox data for every page) is only needed
+        # by the IDFC/RBL band-position parsers below. Collecting it
+        # unconditionally for every PDF — including huge ones where it's
+        # never used — was doing a second full-document layout pass for
+        # nothing. Layer D (_word_position_parser) does its own pass later
+        # if it's actually needed.
         page_words = []
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                page_words.append(
-                    page.extract_words(x_tolerance=2, y_tolerance=2)
-                )
+        if bank_hint in ("idfc", "rbl"):
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    page_words.append(
+                        page.extract_words(x_tolerance=2, y_tolerance=2)
+                    )
+                    try:
+                        page.flush_cache()
+                    except Exception:
+                        pass
 
         # Layer A: bank-specific
         if bank_hint == "idfc":
@@ -368,6 +450,13 @@ def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnin
             df = _parse_bob(all_text_lines, warnings)
             if not df.empty:
                 warnings.append("PDF: Bank of Baroda text parser")
+                return df, header_text, "pdf", warnings
+
+        if bank_hint == "kerala_gramin":
+            df, kw = _parse_kerala_gramin_txt(all_text_lines)
+            if not df.empty:
+                warnings.extend(kw)
+                warnings.append("PDF: Kerala Gramin fixed-width text parser")
                 return df, header_text, "pdf", warnings
 
         df = _parse_date_amount_lines(all_text_lines, warnings)
@@ -396,10 +485,22 @@ def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnin
                 return df, header_text, "pdf", warnings
             warnings.append("PDF: generic word-position parser produced invalid table")
 
-        # Layer E: scanned PDF OCR fallback
-        ocr_df, ocr_header, ocr_warnings = _pdf_ocr_fallback(file_path, warnings)
-        if not ocr_df.empty:
-            return ocr_df, header_text or ocr_header, "pdf", ocr_warnings
+        # Layer E: scanned PDF OCR fallback — only worth trying if this
+        # PDF doesn't already have a real text layer. Running OCR on a
+        # PDF that has extractable text (it just didn't match any of our
+        # table/layout heuristics) burns 10-25+s per file rendering pages
+        # to images and produces lower-quality output than the text we
+        # already had — this was the main cause of files being silently
+        # discarded as "no rows found" in the Secondary dataset.
+        if allow_ocr:
+            ocr_df, ocr_header, ocr_warnings = _pdf_ocr_fallback(file_path, warnings)
+            if not ocr_df.empty:
+                return ocr_df, header_text or ocr_header, "pdf", ocr_warnings
+        else:
+            warnings.append(
+                "PDF: skipped OCR fallback (page already has a real text "
+                "layer — OCR would not help; check table/layout heuristics instead)"
+            )
 
         warnings.append("PDF: all fallbacks failed")
         return pd.DataFrame(), header_text, "pdf", warnings
@@ -435,6 +536,11 @@ def _pdf_ocr_fallback(file_path, warnings):
                     page_images.append(img)
                 except Exception:
                     continue
+                finally:
+                    try:
+                        page.flush_cache()
+                    except Exception:
+                        pass
     except Exception as e:
         return pd.DataFrame(), "", ocr_warnings + [f"PDF OCR fallback open error: {e}"]
 
@@ -656,23 +762,42 @@ def _parse_bob(lines, warnings):
 def _parse_date_amount_lines(lines, warnings):
     rows = []
     header_seen = False
-    amount_re = re.compile(r'^[\d,]+\.\d{2}(?:CR|DR)?$')
+    prev_balance = None
+    # Accepts plain "20.00", suffixed "20.00CR"/"20.00 DR", AND
+    # parenthesized "20.00(Cr)" — Kotak Mahindra statements use the
+    # parenthesized form, which the plain-suffix pattern silently
+    # rejected, causing every row to fail and fall through to the far
+    # less reliable generic word-position parser.
+    amount_re = re.compile(r'^[\d,]+\.\d{2}(?:\s*\(?(?:CR|DR)\)?)?$', re.IGNORECASE)
+    # Header keyword sets — broadened beyond one hardcoded string so this
+    # generic parser catches any "date + narration + trailing amount(s) +
+    # balance" statement layout (DCB Bank, Kotak, and others all match
+    # this shape but each phrases the header line differently).
+    _date_kw = ("date",)
+    _amt_kw = ("withdraw", "deposit", "debit", "credit", "amount", "balance", "particular")
     for raw in lines:
         line = str(raw).strip()
         if not line:
             continue
-        if "Date Tran Ref Num Particulars" in line or "Date Tran Ref" in line:
-            header_seen = True
-            continue
         if not header_seen:
+            ll = line.lower()
+            if any(k in ll for k in _date_kw) and any(k in ll for k in _amt_kw):
+                header_seen = True
             continue
         if line.startswith("Id Date"):
             continue
-        if line.startswith("Account Opening balance"):
+        if line.startswith("Account Opening balance") or line.startswith("Opening Balance"):
             continue
         if line.startswith("Brought Forward"):
             continue
-        if line.startswith("Total("):
+        if line.startswith("B/F"):
+            # "B/F 0.00(Cr)" — Kotak's opening balance line. Capturing it
+            # means even the FIRST transaction row gets a real balance to
+            # compare against, instead of falling back to a guess.
+            bf_val, _ = _simple_amount_parse(line[3:].strip())
+            prev_balance = bf_val
+            continue
+        if line.startswith("Total(") or line.startswith("Total ") or line.startswith("Closing Balance"):
             continue
         if line.startswith("Manager/") or line.startswith("Date :"):
             continue
@@ -700,24 +825,43 @@ def _parse_date_amount_lines(lines, warnings):
         narration = " ".join(tokens).strip()
         utr_ref = ""
         debit = credit = 0.0
+        bal_val, bal_sign = _simple_amount_parse(balance_token)
+
         if len(amount_tokens) == 1:
             amt_val, amt_sign = _simple_amount_parse(amount_tokens[0])
-            bal_val, bal_sign = _simple_amount_parse(balance_token)
-            if bal_sign == "+":
-                credit = amt_val
+            # The balance's own (Cr)/(Dr) suffix says whether the ACCOUNT
+            # is in credit or overdrawn overall — it says nothing about
+            # whether THIS transaction was a debit or credit (almost every
+            # row has "(Cr)" on Kotak statements regardless of direction,
+            # since the account rarely goes overdrawn). The only reliable
+            # signal is whether the balance moved up or down versus the
+            # previous row.
+            if prev_balance is not None:
+                if bal_val > prev_balance + 1e-6:
+                    credit = amt_val
+                elif bal_val < prev_balance - 1e-6:
+                    debit = amt_val
+                else:
+                    credit = amt_val
             elif bal_sign == "-":
+                # No prior balance to compare against (first row, and no
+                # B/F opening balance was found) — an overdrawn balance
+                # after a single transaction at least tells us it was a
+                # debit; otherwise we can't know, so default to credit.
                 debit = amt_val
             else:
                 credit = amt_val
         else:
             amt1, sign1 = _simple_amount_parse(amount_tokens[-2])
             amt2, sign2 = _simple_amount_parse(amount_tokens[-1])
-            bal_val, bal_sign = _simple_amount_parse(balance_token)
             if sign2 or sign1:
                 credit = amt1 if sign2 in ("+", "") else 0.0
                 debit = amt1 if sign2 == "-" else 0.0
             else:
                 credit = amt2
+
+        if bal_val is not None:
+            prev_balance = bal_val
 
         if txn_code and txn_code.isalnum() and not txn_code.startswith("0"):
             utr_ref = txn_code
@@ -743,7 +887,13 @@ def _simple_amount_parse(val):
     if not s:
         return 0.0, ""
     sign = ""
-    if s.upper().endswith("CR"):
+    # Strip a trailing parenthesized suffix first — "20.00(Cr)" — before
+    # falling back to the plain "20.00CR" form.
+    m = re.match(r'^(.*?)\s*\((CR|DR)\)\s*$', s, re.IGNORECASE)
+    if m:
+        s, tag = m.group(1).strip(), m.group(2).upper()
+        sign = "+" if tag == "CR" else "-"
+    elif s.upper().endswith("CR"):
         sign = "+"
         s = s[:-2].strip()
     elif s.upper().endswith("DR"):
@@ -808,6 +958,10 @@ def _word_position_parser(pdf, warnings):
             y = round(float(w.get("top",0))/Y_TOL)*Y_TOL
             x = float(w.get("x0",0))
             all_rows_by_y.setdefault(y, []).append((x, text))
+        try:
+            page.flush_cache()
+        except Exception:
+            pass
     if not all_rows_by_y: return pd.DataFrame()
 
     text_rows = [sorted(all_rows_by_y[y], key=lambda t:t[0])

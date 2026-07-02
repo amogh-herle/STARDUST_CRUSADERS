@@ -566,18 +566,72 @@ def _extract_time(row, roles: dict) -> str:
     return "00:00:00"
 
 
+# Words that show up on the same line as a name in Indian bank statement
+# headers (field labels or address tokens) and should never be swallowed
+# into the captured name — matched per-token, so capture stops right
+# before the first one of these.
+_NAME_STOP_WORDS = {
+    "account", "address", "city", "state", "pin", "pincode", "code", "ifsc",
+    "micr", "branch", "phone", "email", "nomination", "joint", "holder",
+    "holders", "statement", "cust", "id", "currency", "limit", "report",
+    "opening", "closing", "for", "page", "service", "outlet", "district",
+    "taluka", "dist", "house", "street", "road", "colony", "nagar", "near",
+    "post", "village", "floor", "block", "sector", "society", "apartment",
+    "chowk", "mode", "gali", "marg", "layout", "extension", "vihar",
+    "phase", "opp", "opposite", "no", "number",
+}
+_NAME_STOP = "|".join(sorted(_NAME_STOP_WORDS))
+
+
+def _clean_name(raw: str) -> str:
+    name = re.sub(r"\s+", " ", raw).strip(" .:-")
+    # Drop a trailing run-on word only if it's clearly not part of a name
+    # (e.g. picked up the start of the next field on the same line).
+    return name.title() if name else ""
+
+
 def _extract_account_holder(text: str) -> str:
     if not text:
         return ""
-    patterns = [
-        r"(?:account holder|account name|name|customer)[:\s]+([A-Za-z][A-Za-z\s\.]{2,40}?)(?:\n|$|account|ifsc)",
-        r"(?:A/C Name|Ac Name)\s*:\s*([A-Za-z\s\.MR\.MRS\.]{3,40})",
-        r"(?:Accountholder Name)\s*:\s*(MR\.?\s*[A-Za-z\s\.]{3,40})",
+
+    # Stop each token at the first field-label/address word (MICR, ADDRESS,
+    # STREET, ...) rather than capturing a fixed word count, so a same-line
+    # address ("ADITYA Ranipur Mode, Haridwar...") stops after "Aditya" and
+    # "ANIL AARAV GHOSH MICR: ..." stops after "Ghosh".
+    _NOT_STOP = r"(?!(?:" + _NAME_STOP + r")\b)"
+    _NAME_TOKENS = (
+        r"((?:MRS?\.?\s+|MS\.?\s+|M/S\.?\s+)?"
+        + _NOT_STOP + r"[A-Za-z]+(?:[ .]+" + _NOT_STOP + r"[A-Za-z]+){0,3})"
+    )
+
+    labeled_patterns = [
+        r"a/?c\s*name\s*:?\s*" + _NAME_TOKENS,
+        r"account\s*title\s*:?\s*" + _NAME_TOKENS,
+        r"account\s*holder(?:'?s)?(?:\s*name)?\s*:?\s*" + _NAME_TOKENS,
+        r"customer\s*name\s*:?\s*" + _NAME_TOKENS,
+        r"accountholder\s*name\s*:?\s*" + _NAME_TOKENS,
+        r"(?:^|\n)\s*name\s*:?\s*" + _NAME_TOKENS,
     ]
-    for p in patterns:
+    for p in labeled_patterns:
         m = re.search(p, text, re.IGNORECASE)
         if m:
-            return m.group(1).strip().title()
+            name = _clean_name(m.group(1))
+            if name:
+                return name
+
+    # No labeled field found — some statements (e.g. multi-column PDF
+    # extractions) just have the name sitting on its own line, optionally
+    # prefixed with a title, with no "Name:" label at all.
+    for line in text.split("\n"):
+        m = re.match(
+            r"^\s*(MRS?\.?|MS\.?|M/S)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+){0,2})\s*$",
+            line.strip(),
+        )
+        if m:
+            name = _clean_name(f"{m.group(1)} {m.group(2)}")
+            if name:
+                return name
+
     return ""
 
 
