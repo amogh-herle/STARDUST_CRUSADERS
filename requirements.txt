@@ -8,7 +8,6 @@ xlrd==2.0.1
 
 # PDF Parsing
 pdfplumber==0.11.4
-pdfminer.six>=20240706
 
 # OCR
 pytesseract==0.3.13
