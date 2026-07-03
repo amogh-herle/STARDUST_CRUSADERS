@@ -245,6 +245,7 @@ def parse_pdf(file_path, password=None, password_candidates=None):
                     total_text_chars += len(t)
 
                 tables = []
+                fallback_tables = None
                 strat_order = STRATEGIES
                 if winning_strategy_idx is not None:
                     # try the strategy that already worked on this document
@@ -257,15 +258,44 @@ def parse_pdf(file_path, password=None, password_candidates=None):
                     try:
                         candidate = (page.extract_tables(strat) if strat
                                      else page.extract_tables())
-                        if candidate and any(
+                        if not candidate:
+                            continue
+                        has_shape = any(
                             t and len(t) >= 1 and len(t[0]) >= 4
                             for t in candidate
-                        ):
+                        )
+                        if not has_shape:
+                            continue
+                        if fallback_tables is None:
+                            fallback_tables = candidate  # last resort if nothing looks txn-like
+                        if winning_strategy_idx is not None:
+                            # Already proven on an earlier page — trust it
+                            # and stop here rather than re-checking every
+                            # page (that's the whole point of caching it).
+                            tables = candidate
+                            break
+                        # Only LOCK IN a strategy for reuse on later pages
+                        # once it's produced something that actually looks
+                        # like transaction data (date + amount keywords in
+                        # a row) — not just any 4+ column shape. A page's
+                        # address/account-info block can easily satisfy
+                        # "≥4 columns" too, and locking onto that
+                        # permanently prevented the real strategy from ever
+                        # being tried on the rest of the document. Keep
+                        # trying the remaining strategies on THIS page
+                        # rather than settling for the first shape match.
+                        looks_like_txns = any(
+                            _is_txn_table([t[0], t[1]])
+                            for t in candidate if t and len(t) >= 2
+                        )
+                        if looks_like_txns:
                             tables = candidate
                             winning_strategy_idx = STRATEGIES.index(strat) if strat else len(STRATEGIES) - 1
                             break
                     except Exception:
                         continue
+                if not tables and fallback_tables is not None:
+                    tables = fallback_tables
 
                 for table in tables:
                     if not table:
@@ -345,6 +375,22 @@ def parse_pdf(file_path, password=None, password_candidates=None):
     if all_rows and headers:
         df = pd.DataFrame(all_rows, columns=headers).replace("", np.nan).infer_objects(copy=False)
         if _is_valid_transaction_table(df):
+            # A "valid" table that's suspiciously small for how many pages
+            # this document has (e.g. 13 rows across 13 pages) is worth a
+            # second opinion — that pattern is exactly what happened when
+            # UCO Bank's rotated watermark text corrupted most of the
+            # table extraction, leaving only a small legible fragment that
+            # still technically passed validation. Only worth the extra
+            # pass when the mismatch is stark, so this doesn't slow down
+            # the normal (correct, table-based) case.
+            if n_pages >= 3 and len(df) < n_pages * 2:
+                alt_df = _parse_wrapped_narration_lines(list(all_text_lines), [])
+                if len(alt_df) > len(df) * 2:
+                    warnings.append(
+                        f"PDF table looked incomplete ({len(df)} rows / {n_pages} pages) — "
+                        f"wrapped-narration parser found {len(alt_df)}, using that instead"
+                    )
+                    return alt_df, header_text, "pdf", warnings
             warnings.append(f"PDF table: {len(df)} rows, {len(headers)} cols "
                             f"(bank={bank_hint})")
             return df, header_text, "pdf", warnings
@@ -473,6 +519,11 @@ def _pdf_text_fallback(file_path, header_text, bank_hint, all_text_lines, warnin
         df = _parse_date_amount_lines(all_text_lines, warnings)
         if not df.empty:
             warnings.append("PDF: date/amount line parser")
+            return df, header_text, "pdf", warnings
+
+        df = _parse_wrapped_narration_lines(all_text_lines, warnings)
+        if not df.empty:
+            warnings.append("PDF: wrapped-narration parser")
             return df, header_text, "pdf", warnings
 
         # Layer B: double-space text split
@@ -1326,6 +1377,200 @@ def parse_json(file_path):
 
 
 # ── Kerala Gramin / fixed-width TXT special-case parser
+def _parse_pnb_ledger(lines, warnings):
+    """
+    Punjab National Bank "Customer Account Ledger Report" — a mainframe-
+    style report (REP31) with wide fixed-column spacing. Two dates
+    (GL Date, Value Date) per row, then Instrmnt Number / Particulars /
+    Debit / Credit / Balance / Entry User Id / Verified User Id, all
+    separated by runs of 2+ spaces. Only one of Debit/Credit is populated
+    per row, so it collapses to a single trailing amount in the split —
+    direction comes from the running balance, same as the other
+    single-amount statement formats.
+    """
+    date_re = re.compile(r'^\d{2}-\d{2}-\d{4}$')
+    amount_re = re.compile(r'^[\d,]+\.\d{2}(?:CR|DR)?$', re.IGNORECASE)
+    rows = []
+    prev_balance = None
+    started = False
+
+    for raw in lines:
+        line = str(raw).rstrip()
+        if not line.strip():
+            continue
+        stripped = line.strip()
+
+        if stripped.startswith("B/F Balance") or "Opening Balance" in stripped:
+            tail = stripped.split(":", 1)[-1].strip()
+            if amount_re.match(tail):
+                prev_balance, _ = _simple_amount_parse(tail)
+            started = True
+            continue
+        if stripped.startswith("GL.") or stripped.startswith("Date") and "Instrmnt" in stripped:
+            continue
+        if stripped.startswith("Page Total") or stripped.startswith("Total Credit") \
+                or stripped.startswith("Total Debit") or stripped.startswith("Closing Balance") \
+                or stripped.startswith("Signature") or stripped.startswith("Order by") \
+                or stripped.startswith("*") or stripped.startswith("Date "):
+            continue
+
+        parts = [p for p in re.split(r'\s{2,}', stripped) if p]
+        # The balance's Cr/Dr suffix and the following Entry-User-Id are
+        # sometimes only a single space apart (not the double-space this
+        # report otherwise uses), so they land in the same token —
+        # e.g. "20.00Cr CDCI". Split that back apart.
+        norm_parts = []
+        for p in parts:
+            m = re.match(r'^([\d,]+\.\d{2}(?:CR|DR))\s+(\S.*)$', p, re.IGNORECASE)
+            if m:
+                norm_parts.append(m.group(1))
+                norm_parts.append(m.group(2))
+            else:
+                norm_parts.append(p)
+        parts = norm_parts
+        if len(parts) < 5:
+            continue
+        if not (date_re.match(parts[0]) and date_re.match(parts[1])):
+            continue
+        started = True
+
+        date = parts[0]
+        rest = parts[2:]
+        # Last two tokens are the Entry/Verified user IDs (short
+        # alphanumeric codes, never amount-shaped).
+        if len(rest) >= 2 and not amount_re.match(rest[-1]) and not amount_re.match(rest[-2]):
+            rest = rest[:-2]
+        elif len(rest) >= 1 and not amount_re.match(rest[-1]):
+            rest = rest[:-1]
+        if not rest or not amount_re.match(rest[-1]):
+            continue
+
+        balance_token = rest[-1]
+        amount_tokens = rest[:-1]
+        # Drop leading narration tokens, keep only the trailing amount(s)
+        amt_only = []
+        while amount_tokens and amount_re.match(amount_tokens[-1]):
+            amt_only.insert(0, amount_tokens.pop())
+        narration = " ".join(amount_tokens).strip()
+
+        bal_val, _ = _simple_amount_parse(balance_token)
+        debit = credit = 0.0
+        if len(amt_only) == 1:
+            amt_val, _ = _simple_amount_parse(amt_only[0])
+            if prev_balance is not None:
+                if bal_val > prev_balance + 1e-6:
+                    credit = amt_val
+                elif bal_val < prev_balance - 1e-6:
+                    debit = amt_val
+                else:
+                    credit = amt_val
+            else:
+                credit = amt_val
+        elif len(amt_only) >= 2:
+            d_val, _ = _simple_amount_parse(amt_only[0])
+            c_val, _ = _simple_amount_parse(amt_only[1])
+            debit, credit = d_val, c_val
+
+        prev_balance = bal_val
+        rows.append({
+            "date": date,
+            "time": "00:00:00",
+            "narration": narration,
+            "debit": debit,
+            "credit": credit,
+            "balance": balance_token,
+            "utr_ref": "",
+        })
+
+    if not rows:
+        return pd.DataFrame(), []
+    warnings = [f"PNB ledger parser: {len(rows)} txns"]
+    return pd.DataFrame(rows), warnings
+
+
+def _parse_wrapped_narration_lines(lines, warnings):
+    """
+    Some statements (UCO Bank observed so far) wrap each transaction's
+    narration onto a second physical line, and — inconsistently — the
+    transaction amount sometimes stays on the first line next to the
+    balance, and sometimes moves to the continuation line instead. Rather
+    than guess a fixed position, merge every line from one date up to
+    (but not including) the next date into one blob per transaction, then
+    pull all the numbers out of that combined text.
+    """
+    date_re = re.compile(r'^(\d{2}-\d{2}-\d{4})\b')
+    amount_tok_re = re.compile(r'[\d,]+\.\d{2}\s*(?:CR|DR)?', re.IGNORECASE)
+    stop_prefixes = ("Page", "Statement", "Closing Balance", "***", "Generated",
+                     "Opening Balance", "STATEMENT OF ACCOUNT", "DATE ")
+
+    blocks = []
+    cur_date, cur_text = None, []
+    for raw in lines:
+        line = str(raw).strip()
+        if not line:
+            continue
+        m = date_re.match(line)
+        if m:
+            if cur_date is not None:
+                blocks.append((cur_date, " ".join(cur_text)))
+            cur_date, cur_text = m.group(1), [line[m.end():].strip()]
+        elif cur_date is not None and not any(line.startswith(p) for p in stop_prefixes):
+            cur_text.append(line)
+    if cur_date is not None:
+        blocks.append((cur_date, " ".join(cur_text)))
+
+    rows = []
+    prev_balance = None
+    for date, text in blocks:
+        toks = amount_tok_re.findall(text)
+        if not toks:
+            continue
+        # The balance is whichever matched token carries a CR/DR suffix;
+        # if several do (shouldn't normally happen), take the last.
+        balance_token = None
+        amount_candidates = []
+        for tok in toks:
+            t = tok.strip()
+            if re.search(r'(CR|DR)$', t, re.IGNORECASE):
+                balance_token = t
+            else:
+                amount_candidates.append(t)
+        if balance_token is None:
+            continue
+        bal_val, _ = _simple_amount_parse(balance_token)
+        # Narration = text with all matched amount tokens stripped out.
+        narration = amount_tok_re.sub("", text).strip()
+        narration = re.sub(r'\s+', ' ', narration)
+
+        debit = credit = 0.0
+        if amount_candidates:
+            amt_val, _ = _simple_amount_parse(amount_candidates[-1])
+            if prev_balance is not None:
+                if bal_val > prev_balance + 1e-6:
+                    credit = amt_val
+                elif bal_val < prev_balance - 1e-6:
+                    debit = amt_val
+                else:
+                    credit = amt_val
+            else:
+                credit = amt_val
+        prev_balance = bal_val
+        rows.append({
+            "date": date,
+            "time": "00:00:00",
+            "narration": narration,
+            "debit": debit,
+            "credit": credit,
+            "balance": balance_token,
+            "utr_ref": "",
+        })
+
+    if not rows:
+        return pd.DataFrame()
+    warnings.append(f"Wrapped-narration parser: {len(rows)} txns")
+    return pd.DataFrame(rows)
+
+
 def _parse_kerala_gramin_txt(lines):
     """Attempt to parse Kerala Gramin / similar fixed-width bank text dumps.
     Looks for lines starting with a date and trailing amount tokens.
@@ -1423,6 +1668,23 @@ def parse_txt(file_path):
     nonblank = [line.rstrip() for line in lines if line.strip()]
     if not nonblank:
         return pd.DataFrame(), "", "txt", ["TXT file contains only blank lines"]
+
+    # Special-case: Punjab National Bank's "Customer Account Ledger
+    # Report" (REP31) — check this BEFORE the Kerala Gramin trigger below,
+    # since that trigger is just "first line starts with a date", which a
+    # PNB report's print-timestamp line ("08-07-2025 16:35:28  PUNJAB
+    # NATIONAL BANK...") also matches, causing a false-positive 3-row
+    # parse instead of the real ~500+ transactions.
+    try:
+        sample_head_raw = "\n".join(nonblank[:10])
+    except Exception:
+        sample_head_raw = ""
+    if "customer account ledger report" in sample_head_raw.lower():
+        df_p, kw = _parse_pnb_ledger(nonblank, [])
+        if not df_p.empty:
+            warnings.extend(kw)
+            warnings.insert(0, "TXT: PNB ledger parser")
+            return df_p, "", "txt", warnings
 
     # Special-case: Kerala Gramin / fixed-width style statements
     try:

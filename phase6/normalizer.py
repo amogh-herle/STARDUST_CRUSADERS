@@ -150,6 +150,28 @@ def normalize(
     # ── Step 5: Compute balance if missing ───────────────────────────────────
     balance_col = roles.get("balance")
     balance_computed = False
+    if balance_col:
+        # Sanity check: a real running balance varies meaningfully across
+        # a statement. A column that's nearly constant and tiny (e.g.
+        # ~1.00 on every row) is far more likely a mis-assigned "Rate" or
+        # similar column than a genuine balance — seen on PDFs with badly
+        # scrambled/merged table headers where no real balance column
+        # survived extraction at all.
+        try:
+            sample_vals = pd.to_numeric(
+                raw_df[balance_col].astype(str).str.replace(",", "", regex=False),
+                errors="coerce"
+            ).dropna()
+            if len(sample_vals) >= 5:
+                spread = sample_vals.max() - sample_vals.min()
+                if spread < 1.0 and sample_vals.abs().mean() < 10:
+                    warnings.append(
+                        f"Balance column '{balance_col}' looks bogus "
+                        f"(near-constant, spread={spread:.2f}) — discarding"
+                    )
+                    balance_col = None
+        except Exception:
+            pass
     if not balance_col:
         dc = roles.get("debit") or roles.get("amount")
         cc = roles.get("credit") or roles.get("amount")
@@ -199,6 +221,21 @@ def normalize(
                 credit, debit = debit, 0.0
             if c_sign == "-":
                 debit, credit = credit, 0.0
+            # An explicit "/DR/" or "/CR/" marker in the narration (common
+            # on UPI-style narrations) is a stronger signal than the
+            # debit/credit columns on statements where those columns come
+            # from a scrambled/merged PDF table header — on files like
+            # that, the column split can be unreliable even when the two
+            # values aren't literally identical. Trust the narration
+            # marker when present and it disagrees with the columns.
+            amt = debit or credit
+            if amt:
+                nl_marker = re.search(r'/(DR|CR)/', narration)
+                if nl_marker:
+                    if nl_marker.group(1) == "DR":
+                        debit, credit = amt, 0.0
+                    else:
+                        debit, credit = 0.0, amt
         elif roles.get("amount"):
             amt, sign = parse_amount(_get(row, roles["amount"]))
             if sign == "+":
