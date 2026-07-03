@@ -1,43 +1,87 @@
 ======================================================================
 PHASE 8 — INVESTIGATION ANALYTICS SUMMARY
-Run at : 2026-06-29T11:52:18.842476
+Run at : 2026-06-30T20:46:51.454676
 Input  : cleaned_transactions.csv
 ======================================================================
 
 OVERVIEW
 ----------------------------------------
-  Rows analysed           : 848
-  Accounts analysed       : 1
-  Rows with analytics flag: 848
+  Rows analysed           : 14,484
+  Accounts analysed       : 19
+  Rows with analytics flag: 4,366
 
 GRAPH STATISTICS
 ----------------------------------------
-  Graph nodes             : 5
-  Graph edges (transfers) : 4
-  Connected components    : 1
+  Graph nodes             : 11335
+  Graph edges (transfers) : 12306
+  Connected components    : 9
 
 PATTERN DETECTION RESULTS
 ----------------------------------------
-  Round-trips             : 0
+  Round-trips             : 6
   Layering chains         : 0
-  Fan-in collectors       : 0
-  Fan-out distributors    : 0
-  Smurfing / structuring  : 0
-  Odd-hour accounts       : 1
+  Fan-in collectors       : 15
+  Fan-out distributors    : 18
+  Smurfing / structuring  : 13
+  Odd-hour accounts       : 0
 
 RISK SCORE DISTRIBUTION
 ----------------------------------------
   CRITICAL (≥75)          : 0
   HIGH     (≥50)          : 0
-  MEDIUM   (≥25)          : 0
-  LOW      (<25)          : 1
+  MEDIUM   (≥25)          : 6
+  LOW      (<25)          : 13
 
 TOP 10 HIGHEST-RISK ACCOUNTS
 ----------------------------------------
-  [LOW     ] 589302010011548 Score: 18.0  Aryan Nangarath
-             Patterns : ODD_HOUR | HIGH_VALUE | BALANCE_BREACH
-             Reasoning: Odd-hour activity: 848 transactions between 00:00–05:00 | High-value outlier: IQR outlier flagged in
+  [MEDIUM  ] 99572217148131 Score: 32.6  Indian
+             Patterns : ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
+             Reasoning: Round-trip indicators present (0.77 intensity) | Collector behaviour: 14 senders | Distributor behav
 
+  [MEDIUM  ] 18306700003  Score: 32.2  nan
+             Patterns : ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
+             Reasoning: Round-trip indicators present (0.39 intensity) | Collector behaviour: 33 senders | Distributor behav
+
+  [MEDIUM  ] 8642666611469255 Score: 27.7  nan
+             Patterns : ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH
+             Reasoning: Round-trip indicators present (0.61 intensity) | Collector behaviour: 13 senders | Distributor behav
+
+  [MEDIUM  ] 00869354051  Score: 27.4  nan
+             Patterns : FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
+             Reasoning: Collector behaviour: 24 senders | Distributor behaviour: 33 receivers | Structured similarly sized t
+
+  [MEDIUM  ] 17771917925  Score: 26.2  nan
+             Patterns : FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | NEW_HV_BENE
+             Reasoning: Collector behaviour: 15 senders | Distributor behaviour: 25 receivers | Structured similarly sized t
+
+  [MEDIUM  ] 098030016134598 Score: 25.0  nan
+             Patterns : FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | NEW_HV_BENE | GRAPH_CENTRAL
+             Reasoning: Collector behaviour: 101 senders | Distributor behaviour: 3260 receivers | Structured similarly size
+
+  [LOW     ] 92883409730  Score: 22.7  nan
+             Patterns : FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH
+             Reasoning: Collector behaviour: 18 senders | Distributor behaviour: 26 receivers | Structured similarly sized t
+
+  [LOW     ] 24704559049070 Score: 21.2  Indian
+             Patterns : FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
+             Reasoning: Collector behaviour: 9 senders | Distributor behaviour: 14 receivers | Structured similarly sized tr
+
+  [LOW     ] 95773447976527 Score: 20.6  Indian
+             Patterns : FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE
+             Reasoning: Collector behaviour: 10 senders | Distributor behaviour: 31 receivers | Structured similarly sized t
+
+  [LOW     ] 61577175569879 Score: 19.0  Indian
+             Patterns : FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | NEW_HV_BENE
+             Reasoning: Collector behaviour: 8 senders | Distributor behaviour: 14 receivers | Structured similarly sized tr
+
+ROUND-TRIP DETAIL
+----------------------------------------
+  99572217148131 sent 100,000.00 to HEAD OFFICE; 126,100.00 returned after 8.0 days
+  99572217148131 sent 157,000.00 to HEAD OFFICE; 126,100.00 returned after 6.0 days
+  99572217148131 sent 185,000.00 to HEAD OFFICE; 126,100.00 returned after 6.0 days
+  8642666611469255 sent 10,000.00 to 25 NFS; 10,000.00 returned after 1.0 days
+  8642666611469255 sent 10,000.00 to 25 NFS; 10,000.00 returned after 1.0 days
+  18306700003 sent 282,382.00 to 2025_A; 282,382.00 returned after 6.9 days
 
 OUTPUT FILES
 ----------------------------------------
@@ -51,6 +95,7 @@ OUTPUT FILES
   odd_hours.csv                ← odd-hour findings
   beneficiaries.csv            ← beneficiary profiles per account
   risk_scores.csv              ← per-account risk score, tier, reasoning
+  graph_metrics.csv            ← PageRank / betweenness / degree features
   money_trails/                ← forward/backward fund traces for top accounts
   graph_summary.json           ← graph statistics
   analytics_report.json        ← machine-readable full report

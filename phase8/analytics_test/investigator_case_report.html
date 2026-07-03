@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Phase 8 Investigator Case Report</title>
+<style>body{font-family:Arial,sans-serif;margin:24px;color:#111;} h1,h2,h3{color:#1b3a4b;} table{border-collapse:collapse;width:100%;margin-bottom:24px;} th,td{border:1px solid #ddd;padding:8px;vertical-align:top;} th{background:#f4f7fa;} .bar{display:inline-block;height:12px;background:#2d7cd6;border-radius:6px;} .small{text-transform:uppercase;font-size:0.85em;color:#555;} .mono{font-family:monospace;background:#f4f4f4;padding:2px 4px;border-radius:3px;}</style>
+</head><body>
+<h1>Phase 8 Investigator Case Report</h1>
+<p><strong>Date:</strong> 2026-07-01T15:35:52.697444</p>
+<h2>Risk Calibration Overview</h2>
+<p>Phase 8 thresholds are defined as:</p>
+<ul>
+<li><strong>CRITICAL</strong>: score ≥ 75</li>
+<li><strong>HIGH</strong>: score ≥ 50</li>
+<li><strong>MEDIUM</strong>: score ≥ 25</li>
+<li><strong>LOW</strong>: score ≥ 0</li>
+</ul>
+<p><em>Fallback calibration is enabled for low-volume datasets. If no accounts reach HIGH or CRITICAL under absolute thresholds, the system will promote top performers using fallback thresholds.</em></p>
+<p>Fallback thresholds:</p>
+<ul>
+<li><strong>HIGH</strong> fallback: score ≥ 30</li>
+<li><strong>CRITICAL</strong> fallback: score ≥ 45</li>
+</ul>
+<h2>Risk Distribution</h2>
+<table><thead><tr><th>Tier</th><th>Accounts</th></tr></thead><tbody>
+<tr><td>CRITICAL</td><td>0</td></tr>
+<tr><td>HIGH</td><td>2</td></tr>
+<tr><td>MEDIUM</td><td>4</td></tr>
+<tr><td>LOW</td><td>13</td></tr>
+</tbody></table>
+<h2>Top 10 Suspicious Accounts</h2>
+<h3>99572217148131 — HIGH (32.6)</h3>
+<table>
+<tr><th>Holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Active patterns</th><td>ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Round-trip indicators present (0.77 intensity) | Collector behaviour: 14 senders | Distributor behaviour: 5 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>1.0823544325576944 / 1.1771648234422012</td></tr>
+<tr><th>Graph risk</th><td>0.0108</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: no_internal_counterparties (0 hops, 0 trails); Backward: no_internal_counterparties (0 hops, 0 trails)</td></tr>
+</table>
+<h3>18306700003 — HIGH (32.2)</h3>
+<table>
+<tr><th>Holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Active patterns</th><td>ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Round-trip indicators present (0.39 intensity) | Collector behaviour: 33 senders | Distributor behaviour: 5 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>0.9897050746865758 / 1.0954822836537814</td></tr>
+<tr><th>Graph risk</th><td>0.0033</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>8642666611469255 — MEDIUM (27.7)</h3>
+<table>
+<tr><th>Holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDBI Bank</td></tr>
+<tr><th>Active patterns</th><td>ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH</td></tr>
+<tr><th>Risk reasoning</th><td>Round-trip indicators present (0.61 intensity) | Collector behaviour: 13 senders | Distributor behaviour: 10 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues</td></tr>
+<tr><th>Isolation</th><td>0.9608528856266566 / 1.1489834000314945</td></tr>
+<tr><th>Graph risk</th><td>0.0085</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>00869354051 — MEDIUM (27.4)</h3>
+<table>
+<tr><th>Holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 24 senders | Distributor behaviour: 33 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>0.9463288295542097 / 1.0664052041422087</td></tr>
+<tr><th>Graph risk</th><td>0.007</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>17771917925 — MEDIUM (26.2)</h3>
+<table>
+<tr><th>Holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 15 senders | Distributor behaviour: 25 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>0.976637778898701 / 1.102268339886827</td></tr>
+<tr><th>Graph risk</th><td>0.0079</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>098030016134598 — MEDIUM (25.0)</h3>
+<table>
+<tr><th>Holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>Yes Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | NEW_HV_BENE | GRAPH_CENTRAL</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 101 senders | Distributor behaviour: 3260 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | New high-value beneficiary | Graph-central account by PageRank/betweenness/degree</td></tr>
+<tr><th>Isolation</th><td>1.0519557344628288 / 1.1793916272907214</td></tr>
+<tr><th>Graph risk</th><td>1.0</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>92883409730 — LOW (22.7)</h3>
+<table>
+<tr><th>Holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 18 senders | Distributor behaviour: 26 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | Statement balance continuity issues</td></tr>
+<tr><th>Isolation</th><td>0.9592022165596286 / 1.0780609317955165</td></tr>
+<tr><th>Graph risk</th><td>0.0068</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>24704559049070 — LOW (21.2)</h3>
+<table>
+<tr><th>Holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 9 senders | Distributor behaviour: 14 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>1.0835898846504035 / 1.195656862852381</td></tr>
+<tr><th>Graph risk</th><td>0.0093</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>95773447976527 — LOW (20.6)</h3>
+<table>
+<tr><th>Holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 10 senders | Distributor behaviour: 31 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>1.0874921437542442 / 1.2103624383817322</td></tr>
+<tr><th>Graph risk</th><td>0.0041</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h3>61577175569879 — LOW (19.0)</h3>
+<table>
+<tr><th>Holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Active patterns</th><td>FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | NEW_HV_BENE</td></tr>
+<tr><th>Risk reasoning</th><td>Collector behaviour: 8 senders | Distributor behaviour: 14 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | New high-value beneficiary</td></tr>
+<tr><th>Isolation</th><td>1.0712016910243958 / 1.1844366767408718</td></tr>
+<tr><th>Graph risk</th><td>0.0037</td></tr>
+<tr><th>Community</th><td>N/A</td></tr>
+<tr><th>Money trails</th><td>Forward: none; Backward: none</td></tr>
+</table>
+<h2>Community Risk Summary</h2>
+<table><thead><tr><th>Community ID</th><th>Accounts</th><th>Avg Risk</th><th>Max Risk</th></tr></thead><tbody>
+<tr><td>8.0</td><td>1.0</td><td>32.2</td><td>32.2</td></tr>
+<tr><td>13.0</td><td>1.0</td><td>27.7</td><td>27.7</td></tr>
+<tr><td>1.0</td><td>1.0</td><td>27.4</td><td>27.4</td></tr>
+<tr><td>11.0</td><td>1.0</td><td>26.2</td><td>26.2</td></tr>
+<tr><td>7.0</td><td>1.0</td><td>25.0</td><td>25.0</td></tr>
+</tbody></table>
+<h2>Top Communities by Flow</h2>
+<table><thead><tr><th>Community ID</th><th>Members</th><th>Total Flow</th><th>Internal Ratio</th></tr></thead><tbody>
+<tr><td>5</td><td>250</td><td>77690662.1</td><td>0.024</td></tr>
+<tr><td>7</td><td>10405</td><td>71927138.74</td><td>0.0</td></tr>
+<tr><td>9</td><td>95</td><td>22853304.71</td><td>0.011</td></tr>
+<tr><td>8</td><td>34</td><td>17066053.0</td><td>0.029</td></tr>
+<tr><td>3</td><td>70</td><td>14539015.0</td><td>0.014</td></tr>
+</tbody></table>
+</body></html>

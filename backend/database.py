@@ -9,6 +9,8 @@ Connection pooling:
   pool_pre_ping=True            — drops stale connections silently
 """
 
+import socket
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -21,13 +23,35 @@ from config import settings
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    echo=settings.DEBUG,       # log all SQL in dev
-)
+db_url = settings.DATABASE_URL
+if "postgresql" in db_url:
+    if "localhost" in db_url or "127.0.0.1" in db_url:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        try:
+            s.connect(("127.0.0.1", 5432))
+            s.close()
+        except Exception:
+            db_url = "sqlite+aiosqlite:///cidecode.db"
+            print("⚠ PostgreSQL not running on localhost:5432. Falling back to SQLite: cidecode.db")
+
+engine_kwargs = {
+    "pool_pre_ping": True,
+    "echo": settings.DEBUG,
+}
+if "sqlite" not in db_url:
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
+
+engine = create_async_engine(db_url, **engine_kwargs)
+
+if "sqlite" in db_url:
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 
 # ---------------------------------------------------------------------------
 # Session factory

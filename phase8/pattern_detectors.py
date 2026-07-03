@@ -1,479 +1,339 @@
 """
 Phase 8 — Pattern Detectors
 
-Six detectors, each returning a list of Finding dicts and a set of
-flagged transaction indices (for stamping into the main DataFrame).
-
-  1. detect_round_trips   — money leaves and returns to same account
-  2. detect_layering      — rapid hop-chain through 3+ accounts
-  3. detect_fan_in        — many senders → one collector in short window
-  4. detect_fan_out       — one account → many receivers in short window
-  5. detect_smurfing      — structured deposits just below threshold
-  6. detect_odd_hours     — repeated transactions between 00:00-05:00
-
-All detectors are STATISTICAL or STRUCTURAL — no hardcoded rupee values
-except SMURF_THRESHOLD (which is a real regulatory concept, not arbitrary).
+The detectors below use account-relative or dataset-relative thresholds.
+They do not use hardcoded rupee amounts. Counterparty account numbers are
+preferred over names; names are used only as external identities when account
+numbers are unavailable.
 """
 
 from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Optional
+import re
 
+import numpy as np
 import pandas as pd
 import networkx as nx
 
 from analytics_config import (
-    ROUND_TRIP_MAX_DAYS, ROUND_TRIP_MIN_RATIO, ROUND_TRIP_MIN_AMOUNT,
-    LAYERING_MIN_CHAIN, LAYERING_MAX_HOP_HOURS, LAYERING_MIN_AMOUNT,
-    FAN_IN_MIN_SENDERS, FAN_IN_WINDOW_HOURS, FAN_IN_MIN_TOTAL,
-    FAN_OUT_MIN_RECEIVERS, FAN_OUT_WINDOW_HOURS, FAN_OUT_MIN_TOTAL,
-    SMURF_THRESHOLD, SMURF_BAND_LOW, SMURF_MIN_TXNS,
-    SMURF_WINDOW_DAYS, SMURF_MIN_UNIQUE_DEST,
+    ROUND_TRIP_MAX_DAYS, ROUND_TRIP_MIN_RETURN_RATIO, ROUND_TRIP_MAX_RETURN_RATIO,
+    ROUND_TRIP_TOP_QUANTILE, ROUND_TRIP_MAX_FINDINGS_PER_PAIR,
+    LAYERING_MIN_CHAIN, LAYERING_MAX_CHAIN, LAYERING_MAX_HOP_HOURS,
+    LAYERING_MIN_KEEP_RATIO, LAYERING_TOP_QUANTILE,
+    FAN_IN_MIN_SENDERS, FAN_IN_WINDOW_HOURS, FAN_IN_TOP_QUANTILE,
+    FAN_OUT_MIN_RECEIVERS, FAN_OUT_WINDOW_HOURS, FAN_OUT_TOP_QUANTILE,
+    SMURF_MIN_TXNS, SMURF_WINDOW_DAYS, SMURF_MIN_UNIQUE_DEST,
+    SMURF_UPPER_QUANTILE, SMURF_LOWER_RATIO, SMURF_MIN_ACCOUNT_TXNS,
     ODD_HOUR_START, ODD_HOUR_END, ODD_HOUR_MIN_TXNS,
+    ODD_HOUR_MIN_TIMED_TXN_RATIO, ODD_HOUR_MIN_ODD_RATIO,
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. ROUND-TRIP DETECTION
-# ─────────────────────────────────────────────────────────────────────────────
+def detect_round_trips(df: pd.DataFrame, txn_graph: nx.MultiDiGraph) -> tuple[list[dict], set]:
+    findings, flagged_idx = [], set()
+    tx = _prepare_tx(df)
+    debits = tx[tx["debit"] > 0].copy()
+    credits = tx[tx["credit"] > 0].copy()
+    if debits.empty or credits.empty:
+        return findings, flagged_idx
 
-def detect_round_trips(
-    df: pd.DataFrame,
-    txn_graph: nx.MultiDiGraph,
-) -> tuple[list[dict], set]:
-    """
-    A round trip is: Account A sends money to Account B, and within
-    ROUND_TRIP_MAX_DAYS money flows back to A (≥ ROUND_TRIP_MIN_RATIO of
-    the original amount).
+    debit_floor = _account_amount_floor(debits, "account_id", "debit", ROUND_TRIP_TOP_QUANTILE)
+    credit_by_acc = {acc: g.sort_values("_ts") for acc, g in credits.groupby("account_id")}
+    seen_pairs = defaultdict(int)
 
-    Detection: for every debit from A to B, look for a credit from B to A
-    within the window. Uses the txn_graph for fast neighbour lookup.
-    """
-    findings = []
-    flagged_idx = set()
-
-    # Build debit and credit maps: {(from, to): [(amount, timestamp, row_idx)]}
-    debit_map  = defaultdict(list)
-    credit_map = defaultdict(list)
-
-    for idx, row in df.iterrows():
-        ts  = _ts(row)
-        src = row["account_id"]
-        dst = str(row.get("counterparty_name", "")).strip()
-        if not dst or dst == "nan":
+    for idx, d in debits.sort_values("_ts").iterrows():
+        src = d["account_id"]
+        cp = d["_counterparty"]
+        if not cp or d["debit"] < debit_floor.get(src, 0):
             continue
 
-        if row["debit"] > ROUND_TRIP_MIN_AMOUNT:
-            debit_map[(src, dst)].append((float(row["debit"]), ts, idx))
-        if row["credit"] > ROUND_TRIP_MIN_AMOUNT:
-            credit_map[(dst, src)].append((float(row["credit"]), ts, idx))
+        candidates = credit_by_acc.get(src)
+        if candidates is None:
+            continue
+        start, end = d["_ts"], d["_ts"] + timedelta(days=ROUND_TRIP_MAX_DAYS)
+        cands = candidates[(candidates["_ts"] > start) & (candidates["_ts"] <= end)].copy()
+        if cands.empty:
+            continue
 
-    for (src, dst), debits in debit_map.items():
-        reverse_credits = credit_map.get((dst, src), [])
-        for (d_amt, d_ts, d_idx) in debits:
-            for (c_amt, c_ts, c_idx) in reverse_credits:
-                if c_ts <= d_ts:
-                    continue   # return must come AFTER original send
-                gap_days = (c_ts - d_ts).total_seconds() / 86400
-                if gap_days > ROUND_TRIP_MAX_DAYS:
-                    continue
-                ratio = c_amt / d_amt
-                if ratio < ROUND_TRIP_MIN_RATIO:
-                    continue
-
-                findings.append({
-                    "pattern":        "ROUND_TRIP",
-                    "account_a":      src,
-                    "account_b":      dst,
-                    "outflow_amount": round(d_amt, 2),
-                    "return_amount":  round(c_amt, 2),
-                    "return_ratio":   round(ratio, 4),
-                    "outflow_date":   str(d_ts.date()),
-                    "return_date":    str(c_ts.date()),
-                    "gap_days":       round(gap_days, 1),
-                    "severity":       "HIGH" if gap_days < 3 else "MEDIUM",
-                    "description":    (
-                        f"{src} sent ₹{d_amt:,.0f} to {dst} on {d_ts.date()}, "
-                        f"₹{c_amt:,.0f} ({ratio*100:.0f}%) returned {gap_days:.1f}d later"
-                    ),
-                })
-                flagged_idx.update([d_idx, c_idx])
+        # Require same-counterparty evidence. Amount-only round trips create
+        # excessive false positives on dense real statements.
+        cands["_same_party"] = cands["_counterparty"].eq(cp)
+        cands["_ratio"] = cands["credit"] / d["debit"]
+        cands = cands[
+            cands["_same_party"] &
+            (cands["_ratio"] >= ROUND_TRIP_MIN_RETURN_RATIO) &
+            (cands["_ratio"] <= ROUND_TRIP_MAX_RETURN_RATIO)
+        ]
+        if cands.empty:
+            continue
+        cands["_rank"] = (cands["_ratio"] - 1).abs()
+        c = cands.sort_values(["_rank", "_ts"]).iloc[0]
+        pair_key = (src, cp)
+        if seen_pairs[pair_key] >= ROUND_TRIP_MAX_FINDINGS_PER_PAIR:
+            continue
+        seen_pairs[pair_key] += 1
+        gap_days = (c["_ts"] - d["_ts"]).total_seconds() / 86400
+        findings.append({
+            "pattern": "ROUND_TRIP",
+            "account_a": src,
+            "account_b": cp,
+            "outflow_amount": round(float(d["debit"]), 2),
+            "return_amount": round(float(c["credit"]), 2),
+            "return_ratio": round(float(c["_ratio"]), 4),
+            "outflow_date": str(d["_ts"].date()),
+            "return_date": str(c["_ts"].date()),
+            "gap_days": round(gap_days, 1),
+            "evidence": "same_counterparty" if bool(c["_same_party"]) else "amount_time_match",
+            "severity": "HIGH" if gap_days <= 3 and bool(c["_same_party"]) else "MEDIUM",
+            "description": f"{src} sent {d['debit']:,.2f} to {cp}; {c['credit']:,.2f} returned after {gap_days:.1f} days",
+        })
+        flagged_idx.update([idx, c.name])
 
     return findings, flagged_idx
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. LAYERING DETECTION
-# ─────────────────────────────────────────────────────────────────────────────
-
-def detect_layering(
-    df: pd.DataFrame,
-    txn_graph: nx.MultiDiGraph,
-) -> tuple[list[dict], set]:
-    """
-    Layering: money moves through a chain of 3+ accounts, each hop within
-    LAYERING_MAX_HOP_HOURS of the previous, with each hop amount ≥
-    LAYERING_MIN_AMOUNT.
-
-    Uses DFS on the time-ordered txn_graph starting from every node.
-    """
-    findings = []
-    flagged_idx = set()
-
-    # Build time-ordered edge list per source node
-    # {node: [(timestamp, target, amount, row_idx)]}
+def detect_layering(df: pd.DataFrame, txn_graph: nx.MultiDiGraph) -> tuple[list[dict], set]:
+    findings, flagged_idx = [], set()
+    internal_nodes = {n for n, data in txn_graph.nodes(data=True) if data.get("is_internal")}
     edge_index = defaultdict(list)
-    for idx, row in df.iterrows():
-        src = row["account_id"]
-        dst = str(row.get("counterparty_name", "")).strip()
-        if not dst or dst == "nan":
-            continue
-        amt = float(row.get("debit", 0) or 0)
-        if amt < LAYERING_MIN_AMOUNT:
-            continue
-        ts = _ts(row)
-        edge_index[src].append((ts, dst, amt, idx))
 
-    # Sort each source's edges by timestamp
+    for u, v, key, data in txn_graph.edges(keys=True, data=True):
+        if u not in internal_nodes or v not in internal_nodes:
+            continue
+        edge_index[u].append((data["timestamp"], v, float(data["amount"]), data.get("row_idx")))
     for src in edge_index:
         edge_index[src].sort(key=lambda x: x[0])
 
-    # DFS for chains
-    def dfs(node, chain, last_ts, last_amt, visited, chain_idxs):
+    all_amounts = [e[2] for edges in edge_index.values() for e in edges]
+    if not all_amounts:
+        return findings, flagged_idx
+    global_floor = float(np.quantile(all_amounts, LAYERING_TOP_QUANTILE))
+
+    def dfs(node, chain, last_ts, last_amt, visited, idxs):
         if len(chain) >= LAYERING_MIN_CHAIN:
-            findings.append(_make_layering_finding(chain, chain_idxs))
-            flagged_idx.update(chain_idxs)
-
-        if len(chain) >= 8:   # hard cap on chain length
+            finding = _make_layering_finding(chain, idxs)
+            findings.append(finding)
+            flagged_idx.update(i for i in idxs if i is not None)
+        if len(chain) >= LAYERING_MAX_CHAIN:
             return
-
-        for (ts, dst, amt, row_idx) in edge_index.get(node, []):
-            if ts < last_ts:
+        for ts, dst, amt, row_idx in edge_index.get(node, []):
+            if dst in visited or amt < global_floor:
                 continue
-            gap_hours = (ts - last_ts).total_seconds() / 3600
-            if gap_hours > LAYERING_MAX_HOP_HOURS:
-                break   # sorted by time; no point continuing
-            if dst in visited:
-                continue   # no cycles
+            if chain:
+                gap = (ts - last_ts).total_seconds() / 3600
+                if gap < 0:
+                    continue
+                if gap > LAYERING_MAX_HOP_HOURS:
+                    break
+                if last_amt > 0 and (amt / last_amt) < LAYERING_MIN_KEEP_RATIO:
+                    continue
+            dfs(dst, chain + [(node, dst, amt, str(ts.date()))], ts, amt, visited | {dst}, idxs + [row_idx])
 
-            dfs(
-                dst,
-                chain + [(node, dst, amt, str(ts.date()))],
-                ts, amt,
-                visited | {dst},
-                chain_idxs + [row_idx],
-            )
+    for start in list(edge_index):
+        dfs(start, [], datetime(2000, 1, 1), 0.0, {start}, [])
 
-    for start_node in list(edge_index.keys()):
-        dfs(start_node, [], datetime(2000, 1, 1), float("inf"), {start_node}, [])
-
-    # Deduplicate: if a longer chain subsumes a shorter, keep the longer
     findings = _dedup_layering(findings)
     return findings, flagged_idx
 
 
+def detect_fan_in(df: pd.DataFrame) -> tuple[list[dict], set]:
+    return _detect_fan(df, direction="in")
+
+
+def detect_fan_out(df: pd.DataFrame) -> tuple[list[dict], set]:
+    return _detect_fan(df, direction="out")
+
+
+def detect_smurfing(df: pd.DataFrame) -> tuple[list[dict], set]:
+    findings, flagged_idx = [], set()
+    tx = _prepare_tx(df)
+    debit_df = tx[(tx["debit"] > 0) & (tx["_counterparty"] != "")].copy()
+
+    for acc_id, group in debit_df.groupby("account_id"):
+        if len(group) < SMURF_MIN_ACCOUNT_TXNS:
+            continue
+        amounts = group["debit"]
+        upper = float(amounts.quantile(SMURF_UPPER_QUANTILE))
+        lower = upper * SMURF_LOWER_RATIO
+        if upper <= 0 or lower <= 0:
+            continue
+        band = group[(group["debit"] >= lower) & (group["debit"] <= upper)].sort_values("_ts")
+        rows = band.to_dict("records")
+        idxs = band.index.tolist()
+        for i, row_i in enumerate(rows):
+            window_end = row_i["_ts"] + timedelta(days=SMURF_WINDOW_DAYS)
+            win_rows, win_idxs = [], []
+            for j in range(i, len(rows)):
+                if rows[j]["_ts"] > window_end:
+                    break
+                win_rows.append(rows[j]); win_idxs.append(idxs[j])
+            if len(win_rows) < SMURF_MIN_TXNS:
+                continue
+            destinations = {r["_counterparty"] for r in win_rows if r["_counterparty"]}
+            if len(destinations) < SMURF_MIN_UNIQUE_DEST:
+                continue
+            total = sum(float(r["debit"]) for r in win_rows)
+            findings.append({
+                "pattern": "SMURFING",
+                "account": acc_id,
+                "txn_count": len(win_rows),
+                "total_amount": round(total, 2),
+                "amount_band_low": round(lower, 2),
+                "amount_band_high": round(upper, 2),
+                "unique_destinations": len(destinations),
+                "destinations": sorted(destinations)[:25],
+                "window_start": str(win_rows[0]["_ts"].date()),
+                "window_end": str(win_rows[-1]["_ts"].date()),
+                "severity": "HIGH" if len(win_rows) >= SMURF_MIN_TXNS * 2 else "MEDIUM",
+                "description": f"{acc_id} made {len(win_rows)} similarly sized transfers to {len(destinations)} destinations inside {SMURF_WINDOW_DAYS} days",
+            })
+            flagged_idx.update(win_idxs)
+            break
+    return findings, flagged_idx
+
+
+def detect_odd_hours(df: pd.DataFrame) -> tuple[list[dict], set]:
+    findings, flagged_idx = [], set()
+    tx = _prepare_tx(df)
+    tx["_hour"] = tx["time"].apply(_extract_hour)
+    tx["_has_real_time"] = ~tx["time"].fillna("").astype(str).str.strip().isin(["", "nan", "00:00:00", "00:00"])
+
+    for acc_id, group in tx.groupby("account_id"):
+        timed = group[group["_has_real_time"]]
+        if len(timed) < ODD_HOUR_MIN_TXNS:
+            continue
+        timed_ratio = len(timed) / max(len(group), 1)
+        if timed_ratio < ODD_HOUR_MIN_TIMED_TXN_RATIO:
+            continue
+        odd = timed[(timed["_hour"] >= ODD_HOUR_START) & (timed["_hour"] < ODD_HOUR_END)]
+        if len(odd) < ODD_HOUR_MIN_TXNS:
+            continue
+        odd_ratio = len(odd) / len(timed)
+        if odd_ratio < ODD_HOUR_MIN_ODD_RATIO:
+            continue
+        findings.append({
+            "pattern": "ODD_HOUR",
+            "account": acc_id,
+            "odd_hour_txns": int(len(odd)),
+            "timed_txns": int(len(timed)),
+            "odd_hour_ratio": round(float(odd_ratio), 4),
+            "total_debit": round(float(odd["debit"].sum()), 2),
+            "total_credit": round(float(odd["credit"].sum()), 2),
+            "hours_active": sorted(odd["_hour"].unique().tolist()),
+            "first_date": str(odd["date"].min()),
+            "last_date": str(odd["date"].max()),
+            "severity": "HIGH" if odd_ratio >= 0.5 else "MEDIUM",
+            "description": f"{acc_id} has {len(odd)} real timestamped odd-hour transactions ({odd_ratio:.0%} of timed activity)",
+        })
+        flagged_idx.update(odd.index.tolist())
+    return findings, flagged_idx
+
+
+def _detect_fan(df: pd.DataFrame, direction: str) -> tuple[list[dict], set]:
+    findings, flagged_idx = [], set()
+    tx = _prepare_tx(df)
+    if direction == "in":
+        work = tx[(tx["credit"] > 0) & (tx["_counterparty"] != "")].copy()
+        amount_col, min_parties, window_hours, quantile = "credit", FAN_IN_MIN_SENDERS, FAN_IN_WINDOW_HOURS, FAN_IN_TOP_QUANTILE
+        acct_label, party_label, pattern = "collector", "senders", "FAN_IN"
+    else:
+        work = tx[(tx["debit"] > 0) & (tx["_counterparty"] != "")].copy()
+        amount_col, min_parties, window_hours, quantile = "debit", FAN_OUT_MIN_RECEIVERS, FAN_OUT_WINDOW_HOURS, FAN_OUT_TOP_QUANTILE
+        acct_label, party_label, pattern = "distributor", "receivers", "FAN_OUT"
+
+    floor_by_acc = _account_amount_floor(work, "account_id", amount_col, quantile)
+    for acc_id, group in work.groupby("account_id"):
+        floor = floor_by_acc.get(acc_id, 0)
+        group = group[group[amount_col] >= floor].sort_values("_ts")
+        rows, idxs = group.to_dict("records"), group.index.tolist()
+        for i, row_i in enumerate(rows):
+            window_end = row_i["_ts"] + timedelta(hours=window_hours)
+            win_rows, win_idxs = [], []
+            for j in range(i, len(rows)):
+                if rows[j]["_ts"] > window_end:
+                    break
+                win_rows.append(rows[j]); win_idxs.append(idxs[j])
+            parties = {r["_counterparty"] for r in win_rows if r["_counterparty"]}
+            if len(parties) < min_parties:
+                continue
+            total = sum(float(r[amount_col]) for r in win_rows)
+            findings.append({
+                "pattern": pattern,
+                acct_label: acc_id,
+                f"{party_label[:-1]}_count": len(parties),
+                party_label: sorted(parties)[:50],
+                "total_inflow" if direction == "in" else "total_outflow": round(total, 2),
+                "window_start": str(win_rows[0]["_ts"].date()),
+                "window_end": str(win_rows[-1]["_ts"].date()),
+                "txn_count": len(win_rows),
+                "amount_floor_used": round(float(floor), 2),
+                "severity": "CRITICAL" if len(parties) >= min_parties * 2 else "HIGH",
+                "description": f"{acc_id} shows {pattern}: {len(parties)} counterparties in {window_hours}h using account-relative amount floor",
+            })
+            flagged_idx.update(win_idxs)
+            break
+    return findings, flagged_idx
+
+
+def _prepare_tx(df: pd.DataFrame) -> pd.DataFrame:
+    tx = df.copy()
+    tx["_ts"] = tx.apply(_ts, axis=1)
+    tx["_counterparty"] = tx.apply(_counterparty_identity, axis=1)
+    return tx
+
+
+def _counterparty_identity(row) -> str:
+    for col in ("counterparty_account", "counterparty_name"):
+        val = row.get(col, "")
+        if pd.isna(val):
+            continue
+        s = str(val).strip()
+        if s and s.lower() not in {"nan", "none", "null"}:
+            return re.sub(r"\s+", " ", s).upper()
+    return ""
+
+
+def _account_amount_floor(df: pd.DataFrame, account_col: str, amount_col: str, quantile: float) -> dict:
+    floors = {}
+    for acc, group in df.groupby(account_col):
+        vals = pd.to_numeric(group[amount_col], errors="coerce").dropna()
+        vals = vals[vals > 0]
+        floors[acc] = float(vals.quantile(quantile)) if len(vals) else 0.0
+    return floors
+
+
 def _make_layering_finding(chain, chain_idxs) -> dict:
     accounts = [c[0] for c in chain] + [chain[-1][1]]
-    amounts  = [c[2] for c in chain]
-    dates    = [c[3] for c in chain]
-    skim     = 1 - (amounts[-1] / amounts[0]) if amounts[0] > 0 else 0
+    amounts = [c[2] for c in chain]
+    dates = [c[3] for c in chain]
+    skim = 1 - (amounts[-1] / amounts[0]) if amounts[0] > 0 else 0
     return {
-        "pattern":     "LAYERING",
-        "chain":       " → ".join(accounts),
-        "chain_length":len(chain),
-        "start_amount":round(amounts[0], 2),
-        "end_amount":  round(amounts[-1], 2),
-        "skim_ratio":  round(skim, 4),
-        "start_date":  dates[0],
-        "end_date":    dates[-1],
-        "accounts":    accounts,
-        "severity":    "CRITICAL" if len(chain) >= 5 else "HIGH",
-        "description": (
-            f"Layering chain {len(chain)} hops: "
-            f"₹{amounts[0]:,.0f} → ₹{amounts[-1]:,.0f} "
-            f"({skim*100:.1f}% skimmed) via {' → '.join(accounts)}"
-        ),
+        "pattern": "LAYERING",
+        "chain": " -> ".join(accounts),
+        "chain_length": len(chain),
+        "start_amount": round(amounts[0], 2),
+        "end_amount": round(amounts[-1], 2),
+        "skim_ratio": round(skim, 4),
+        "start_date": dates[0],
+        "end_date": dates[-1],
+        "accounts": accounts,
+        "row_indices": [i for i in chain_idxs if i is not None],
+        "severity": "CRITICAL" if len(chain) >= 5 else "HIGH",
+        "description": f"Layering chain {len(chain)} hops through {' -> '.join(accounts)} with {skim:.1%} retained/skewed flow",
     }
 
 
 def _dedup_layering(findings: list[dict]) -> list[dict]:
-    """Remove findings whose chain is a strict subset of another finding's chain."""
-    chains = [set(f["accounts"]) for f in findings]
-    keep   = []
-    for i, f in enumerate(findings):
-        subsumed = any(
-            i != j and chains[i].issubset(chains[j])
-            for j in range(len(findings))
-        )
-        if not subsumed:
-            keep.append(f)
-    return keep
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. FAN-IN DETECTION (collector account)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def detect_fan_in(df: pd.DataFrame) -> tuple[list[dict], set]:
-    """
-    Fan-in: an account receives credits from FAN_IN_MIN_SENDERS+ distinct
-    senders within FAN_IN_WINDOW_HOURS, with total inflow ≥ FAN_IN_MIN_TOTAL.
-    This is the hallmark of a COLLECTOR account.
-    """
-    findings = []
-    flagged_idx = set()
-
-    credit_df = df[df["credit"] > 0].copy()
-    credit_df["_ts"] = credit_df.apply(_ts, axis=1)
-
-    for acc_id, group in credit_df.groupby("account_id"):
-        group = group.sort_values("_ts")
-        rows  = group.to_dict("records")
-        idxs  = group.index.tolist()
-
-        # Sliding window
-        for i, (row_i, idx_i) in enumerate(zip(rows, idxs)):
-            window_end = row_i["_ts"] + timedelta(hours=FAN_IN_WINDOW_HOURS)
-            window_rows = []
-            window_idxs = []
-
-            for j in range(i, len(rows)):
-                if rows[j]["_ts"] > window_end:
-                    break
-                window_rows.append(rows[j])
-                window_idxs.append(idxs[j])
-
-            senders = {
-                str(r.get("counterparty_name", "")).strip()
-                for r in window_rows
-                if r.get("counterparty_name") and str(r.get("counterparty_name", "")).strip() != "nan"
-            }
-            total = sum(r["credit"] for r in window_rows)
-
-            if len(senders) < FAN_IN_MIN_SENDERS or total < FAN_IN_MIN_TOTAL:
-                continue
-
-            findings.append({
-                "pattern":         "FAN_IN",
-                "collector":       acc_id,
-                "sender_count":    len(senders),
-                "senders":         list(senders),
-                "total_inflow":    round(total, 2),
-                "window_start":    str(window_rows[0]["_ts"].date()),
-                "window_end":      str(window_rows[-1]["_ts"].date()),
-                "txn_count":       len(window_rows),
-                "severity":        "CRITICAL" if len(senders) >= 8 else "HIGH",
-                "description": (
-                    f"Collector account {acc_id}: ₹{total:,.0f} received from "
-                    f"{len(senders)} senders in {FAN_IN_WINDOW_HOURS}h window "
-                    f"({window_rows[0]['_ts'].date()} – {window_rows[-1]['_ts'].date()})"
-                ),
-            })
-            flagged_idx.update(window_idxs)
-            break   # one finding per account per run (avoid combinatorial explosion)
-
-    return findings, flagged_idx
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. FAN-OUT DETECTION (distribution account / mule)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def detect_fan_out(df: pd.DataFrame) -> tuple[list[dict], set]:
-    """
-    Fan-out: an account sends debits to FAN_OUT_MIN_RECEIVERS+ distinct
-    receivers within FAN_OUT_WINDOW_HOURS, total ≥ FAN_OUT_MIN_TOTAL.
-    Hallmark of a DISTRIBUTION or MULE account.
-    """
-    findings = []
-    flagged_idx = set()
-
-    debit_df = df[df["debit"] > 0].copy()
-    debit_df["_ts"] = debit_df.apply(_ts, axis=1)
-
-    for acc_id, group in debit_df.groupby("account_id"):
-        group = group.sort_values("_ts")
-        rows  = group.to_dict("records")
-        idxs  = group.index.tolist()
-
-        for i, (row_i, idx_i) in enumerate(zip(rows, idxs)):
-            window_end  = row_i["_ts"] + timedelta(hours=FAN_OUT_WINDOW_HOURS)
-            window_rows = []
-            window_idxs = []
-
-            for j in range(i, len(rows)):
-                if rows[j]["_ts"] > window_end:
-                    break
-                window_rows.append(rows[j])
-                window_idxs.append(idxs[j])
-
-            receivers = {
-                str(r.get("counterparty_name", "")).strip()
-                for r in window_rows
-                if r.get("counterparty_name") and str(r.get("counterparty_name", "")).strip() != "nan"
-            }
-            total = sum(r["debit"] for r in window_rows)
-
-            if len(receivers) < FAN_OUT_MIN_RECEIVERS or total < FAN_OUT_MIN_TOTAL:
-                continue
-
-            findings.append({
-                "pattern":         "FAN_OUT",
-                "distributor":     acc_id,
-                "receiver_count":  len(receivers),
-                "receivers":       list(receivers),
-                "total_outflow":   round(total, 2),
-                "window_start":    str(window_rows[0]["_ts"].date()),
-                "window_end":      str(window_rows[-1]["_ts"].date()),
-                "txn_count":       len(window_rows),
-                "severity":        "CRITICAL" if len(receivers) >= 8 else "HIGH",
-                "description": (
-                    f"Distribution account {acc_id}: ₹{total:,.0f} sent to "
-                    f"{len(receivers)} receivers in {FAN_OUT_WINDOW_HOURS}h window "
-                    f"({window_rows[0]['_ts'].date()} – {window_rows[-1]['_ts'].date()})"
-                ),
-            })
-            flagged_idx.update(window_idxs)
-            break
-
-    return findings, flagged_idx
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. SMURFING / STRUCTURING DETECTION
-# ─────────────────────────────────────────────────────────────────────────────
-
-def detect_smurfing(df: pd.DataFrame) -> tuple[list[dict], set]:
-    """
-    Smurfing: multiple transactions in the band
-    [SMURF_THRESHOLD * SMURF_BAND_LOW, SMURF_THRESHOLD)
-    within SMURF_WINDOW_DAYS, directed to SMURF_MIN_UNIQUE_DEST+ distinct
-    destinations.
-
-    This mirrors how AML analysts spot structuring: the amount is
-    deliberately kept just below the CTR-like reporting line.
-    """
-    findings = []
-    flagged_idx = set()
-
-    band_lo = SMURF_THRESHOLD * SMURF_BAND_LOW
-    band_hi = SMURF_THRESHOLD
-
-    debit_df = df[
-        (df["debit"] >= band_lo) & (df["debit"] < band_hi)
-    ].copy()
-    debit_df["_ts"] = debit_df.apply(_ts, axis=1)
-    debit_df["_date"] = pd.to_datetime(debit_df["date"], errors="coerce")
-
-    for acc_id, group in debit_df.groupby("account_id"):
-        group = group.sort_values("_ts")
-        rows  = group.to_dict("records")
-        idxs  = group.index.tolist()
-
-        # Rolling SMURF_WINDOW_DAYS window
-        for i, (row_i, idx_i) in enumerate(zip(rows, idxs)):
-            window_end  = row_i["_ts"] + timedelta(days=SMURF_WINDOW_DAYS)
-            window_rows = []
-            window_idxs = []
-
-            for j in range(i, len(rows)):
-                if rows[j]["_ts"] > window_end:
-                    break
-                window_rows.append(rows[j])
-                window_idxs.append(idxs[j])
-
-            if len(window_rows) < SMURF_MIN_TXNS:
-                continue
-
-            destinations = {
-                str(r.get("counterparty_name", "")).strip()
-                for r in window_rows
-                if r.get("counterparty_name") and str(r.get("counterparty_name", "")).strip() != "nan"
-            }
-
-            if len(destinations) < SMURF_MIN_UNIQUE_DEST:
-                continue
-
-            total = sum(r["debit"] for r in window_rows)
-            amounts = [r["debit"] for r in window_rows]
-
-            findings.append({
-                "pattern":        "SMURFING",
-                "account":        acc_id,
-                "txn_count":      len(window_rows),
-                "total_amount":   round(total, 2),
-                "amounts":        [round(a, 2) for a in amounts],
-                "unique_destinations": len(destinations),
-                "destinations":   list(destinations),
-                "window_start":   str(window_rows[0]["_ts"].date()),
-                "window_end":     str(window_rows[-1]["_ts"].date()),
-                "threshold_used": SMURF_THRESHOLD,
-                "severity":       "HIGH",
-                "description": (
-                    f"Structuring by {acc_id}: {len(window_rows)} transfers "
-                    f"between ₹{band_lo:,.0f}–₹{band_hi:,.0f} "
-                    f"to {len(destinations)} destinations, "
-                    f"total ₹{total:,.0f} over {SMURF_WINDOW_DAYS}d window"
-                ),
-            })
-            flagged_idx.update(window_idxs)
-            break   # one finding per account per run
-
-    return findings, flagged_idx
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. ODD-HOUR DETECTION
-# ─────────────────────────────────────────────────────────────────────────────
-
-def detect_odd_hours(df: pd.DataFrame) -> tuple[list[dict], set]:
-    """
-    Flag accounts with ODD_HOUR_MIN_TXNS+ transactions between
-    ODD_HOUR_START:00 and ODD_HOUR_END:00 (exclusive).
-    This is a soft signal — combined with other patterns it elevates risk.
-    """
-    findings = []
-    flagged_idx = set()
-
-    df = df.copy()
-    df["_hour"] = df["time"].apply(_extract_hour)
-    odd_mask = (df["_hour"] >= ODD_HOUR_START) & (df["_hour"] < ODD_HOUR_END)
-    odd_df   = df[odd_mask]
-
-    for acc_id, group in odd_df.groupby("account_id"):
-        count = len(group)
-        if count < ODD_HOUR_MIN_TXNS:
+    findings = sorted(findings, key=lambda f: (f["chain_length"], f["start_amount"]), reverse=True)
+    kept, seen = [], set()
+    for f in findings:
+        key = tuple(f["accounts"])
+        if any(set(key).issubset(set(k)) for k in seen):
             continue
+        kept.append(f); seen.add(key)
+    return kept
 
-        total_debit  = group["debit"].sum()
-        total_credit = group["credit"].sum()
-        hours_seen   = sorted(group["_hour"].unique().tolist())
-
-        findings.append({
-            "pattern":           "ODD_HOUR",
-            "account":           acc_id,
-            "odd_hour_txns":     count,
-            "total_debit":       round(float(total_debit), 2),
-            "total_credit":      round(float(total_credit), 2),
-            "hours_active":      hours_seen,
-            "first_date":        str(group["date"].min()),
-            "last_date":         str(group["date"].max()),
-            "severity":          "MEDIUM",
-            "description": (
-                f"{acc_id} has {count} transactions between "
-                f"{ODD_HOUR_START:02d}:00–{ODD_HOUR_END:02d}:00 "
-                f"(₹{total_debit:,.0f} debit, ₹{total_credit:,.0f} credit)"
-            ),
-        })
-        flagged_idx.update(group.index.tolist())
-
-    return findings, flagged_idx
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _ts(row) -> datetime:
     date_str = str(row.get("date", "")).strip()
@@ -493,4 +353,4 @@ def _extract_hour(time_str: str) -> int:
     try:
         return int(str(time_str).split(":")[0])
     except (ValueError, IndexError):
-        return 12   # default to noon if unparseable
+        return 12

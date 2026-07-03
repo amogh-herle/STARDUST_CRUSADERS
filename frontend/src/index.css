@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-heading: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+
+  /* Premium Dark Theme Color System */
+  --bg-main: #060813;
+  --bg-card: #0c1126;
+  --bg-card-hover: #141c3b;
+  --border-color: #1e294b;
+  --border-color-focus: #3b82f6;
+
+  /* Typography */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-highlight: #60a5fa;
+
+  /* AML Risk Calibration Colors */
+  --color-critical: #ef4444;
+  --color-critical-bg: rgba(239, 68, 68, 0.15);
+  --color-high: #f97316;
+  --color-high-bg: rgba(249, 115, 22, 0.15);
+  --color-medium: #eab308;
+  --color-medium-bg: rgba(234, 179, 8, 0.15);
+  --color-low: #22c55e;
+  --color-low-bg: rgba(34, 197, 94, 0.15);
+
+  --accent-primary: #2563eb;
+  --accent-glow: rgba(37, 99, 235, 0.25);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.15);
+
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Custom keyframes & classes */
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(59, 130, 246, 0.5);
+  }
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+@keyframes floatGlow {
+  0% { transform: translateY(0px); opacity: 0.3; }
+  50% { transform: translateY(-10px); opacity: 0.5; }
+  100% { transform: translateY(0px); opacity: 0.3; }
+}
+
+.glow-card {
+  box-shadow: 0 0 40px rgba(59, 130, 246, 0.03) inset, 0 4px 30px rgba(0, 0, 0, 0.2);
+}
+
+.gradient-text {
+  background: linear-gradient(to right, #60a5fa, #2563eb, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
