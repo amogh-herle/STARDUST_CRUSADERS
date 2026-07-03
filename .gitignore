@@ -80,7 +80,7 @@ frontend/node_modules/
 phase8/analytics/account_graph.gexf
 phase8/analytics/account_graph.pkl
 phase8/analytics/investigator_case_report.html
-
+phase8/analytics
 # Optional generated reports
 phase8/analytics/*.pdf
 
