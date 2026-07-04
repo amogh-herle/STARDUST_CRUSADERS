@@ -1,0 +1,1 @@
+account_id,account_holder,bank_name,date,time,narration,channel,debit,credit,balance,utr_ref,counterparty_name,counterparty_account,counterparty_ifsc,source_file,source_format,ingestion_warnings
