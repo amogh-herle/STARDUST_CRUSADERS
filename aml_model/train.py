@@ -8,6 +8,11 @@ Run:
 The fitted FeatureEngineer (with frozen account/global statistics) is saved
 INSIDE the model file. predict.py reuses those exact same frozen stats —
 no more leakage when scoring new single-account files.
+
+Post-processing (entity segmentation + suppression rules) is applied
+automatically after scoring. The saved CSV includes entity_segment,
+suppressed, suppression_reason, and final_flag columns alongside the
+raw ML is_flagged. Investigators should act on final_flag, not is_flagged.
 """
 
 import argparse
@@ -22,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.data_loader import DataLoader
 from features.feature_engineering import FeatureEngineer
 from models.isolation_forest_trainer import IsolationForestTrainer
+from models.post_processing import harden_predictions
 from evaluation.evaluator import Evaluator
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -110,27 +116,55 @@ def main():
     print("\n[STEP 6] Saving model (includes frozen FeatureEngineer) …")
     trainer.save(args.name)
 
-    # ── STEP 7: Save scored dataset ──────────────────────────────────────────
+    # ── STEP 7: Post-processing — entity segmentation + suppression rules ────
+    print("\n[STEP 7] Applying post-processing (entity segmentation + suppression) …")
+    df_feat = harden_predictions(df_feat)
+
+    # ── STEP 8: Save scored + hardened dataset ───────────────────────────────
     out_path = os.path.join(REPORT_DIR, f"{args.name}_scored_transactions.csv")
     keep_cols = [c for c in [
         "transaction_id", "account_id", "account_holder", "bank_name",
         "datetime", "narration", "channel", "debit", "credit", "balance",
         "counterparty_account", "counterparty_name", "utr_ref",
         "anomaly_score", "is_flagged", "risk_tier",
-        # columns needed by post_processing.py suppression rules
+        # post-processing output columns
+        "entity_segment", "volume_per_30d", "txns_per_30d",
+        "suppressed", "suppression_reason", "final_flag",
+        # suppression rule inputs (kept for audit / ground truth evaluator)
         "counterparty_txn_freq", "narration_is_salary", "abs_amount",
         "acc_median_amount",
     ] if c in df_feat.columns]
     df_feat[keep_cols].to_csv(out_path, index=False)
-    print(f"[STEP 7] Scored transactions -> {out_path}")
+    print(f"[STEP 8] Scored + hardened transactions -> {out_path}")
 
-    flagged = int(preds.sum())
+    raw_flagged   = int(preds.sum())
+    final_flagged = int(df_feat["final_flag"].sum()) if "final_flag" in df_feat.columns else raw_flagged
+    suppressed    = int(df_feat["suppressed"].sum()) if "suppressed" in df_feat.columns else 0
+
     print("\n" + "=" * 60)
     print("  TRAINING COMPLETE")
     print("=" * 60)
     print(f"  Total transactions :  {len(df_feat)}")
     print(f"  Accounts           :  {df_feat['account_id'].nunique()}")
-    print(f"  Flagged anomalies  :  {flagged}  ({flagged/len(df_feat)*100:.2f}%)")
+    if "entity_segment" in df_feat.columns:
+        n_biz    = (df_feat["entity_segment"] == "business").sum()
+        n_retail = (df_feat["entity_segment"] == "retail").sum()
+        print(f"  Business rows      :  {n_biz}  ({n_biz/len(df_feat)*100:.1f}%)  [vol/30d>=5L & txns/30d>=60 & avg>=5K]")
+        print(f"  Retail rows        :  {n_retail}  ({n_retail/len(df_feat)*100:.1f}%)")
+    print(f"  Raw ML flags       :  {raw_flagged}  ({raw_flagged/len(df_feat)*100:.2f}%)")
+    print(f"  Suppressed by rules:  {suppressed}")
+    print(f"  Final alerts       :  {final_flagged}  ({final_flagged/len(df_feat)*100:.2f}%)")
+    if suppressed > 0 and "suppression_reason" in df_feat.columns:
+        reasons = (
+            df_feat[df_feat["suppressed"]]
+            ["suppression_reason"]
+            .str.rstrip(";").str.split(";")
+            .explode()
+            .value_counts()
+        )
+        print(f"  Suppression breakdown:")
+        for reason, count in reasons.items():
+            print(f"    {reason:30s}: {count}")
     print(f"  Model saved to     :  {MODEL_DIR}/{args.name}.pkl")
     print(f"  Reports saved to   :  {REPORT_DIR}/")
     print("=" * 60)

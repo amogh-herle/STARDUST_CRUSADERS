@@ -28,17 +28,29 @@ import numpy as np
 
 # ── 1. Entity segmentation: Retail vs Business ────────────────────────────────
 
-def segment_entities(df: pd.DataFrame, business_volume_threshold: float = 500_000,
-                      business_txn_threshold: int = 60) -> pd.DataFrame:
+def segment_entities(df: pd.DataFrame,
+                     business_volume_threshold: float = 500_000,
+                     business_txn_threshold: int = 60,
+                     business_avg_txn_threshold: float = 5_000) -> pd.DataFrame:
     """
-    Computes rolling 30-day transaction volume per account and classifies
-    each account as "business" or "retail". Businesses are expected to have
-    high, frequent, recurring transactions — flagging them with the same
-    threshold as an individual causes false positives.
+    Classifies each account as "business" or "retail" using THREE signals,
+    all normalised to a 30-day window to avoid penalising accounts just
+    because they have a long history in the file.
 
-    An account is "business" if EITHER:
-      - total 30-day volume exceeds business_volume_threshold, OR
-      - transaction count exceeds business_txn_threshold in that window
+    An account is "business" only if ALL of the following are true:
+      1. volume_per_30d  >= business_volume_threshold  (default Rs.5,00,000)
+      2. txns_per_30d    >= business_txn_threshold      (default 60 txns/30d)
+      3. avg_txn_amount  >= business_avg_txn_threshold  (default Rs.5,000)
+
+    WHY three conditions instead of one:
+      - A student making 4 UPI payments/day (Rs.200 each) over 6 months would
+        hit ~120 txns/30d but only Rs.24,000 volume/30d and Rs.200 avg —
+        not a business, retail.
+      - A shopkeeper with Rs.10L/30d turnover in 30 transactions of Rs.30,000
+        each is clearly a business.
+      - Using OR logic (any one condition triggers "business") was the bug —
+        it caught high-frequency low-value retail accounts as businesses and
+        suppressed all their alerts.
     """
     df = df.copy()
     if "datetime" not in df.columns:
@@ -53,23 +65,29 @@ def segment_entities(df: pd.DataFrame, business_volume_threshold: float = 500_00
         pd.to_numeric(df.get(credit_col, 0), errors="coerce").fillna(0)
     )
 
-    # 30-day rolling volume & count per account (uses the account's own txn history)
     account_stats = df.groupby("account_id").agg(
         total_volume=("_abs_amount", "sum"),
         n_txns=("_abs_amount", "count"),
+        avg_txn_amount=("_abs_amount", "mean"),
         active_days=("datetime", lambda x: max(1, (x.max() - x.min()).days)),
     )
-    account_stats["volume_per_30d"] = account_stats["total_volume"] / (account_stats["active_days"] / 30)
-    account_stats["txns_per_30d"] = account_stats["n_txns"] / (account_stats["active_days"] / 30)
+    account_stats["volume_per_30d"] = (
+        account_stats["total_volume"] / (account_stats["active_days"] / 30)
+    )
+    account_stats["txns_per_30d"] = (
+        account_stats["n_txns"] / (account_stats["active_days"] / 30)
+    )
 
+    # ALL THREE conditions must be true — AND logic, not OR
     account_stats["entity_segment"] = np.where(
-        (account_stats["volume_per_30d"] >= business_volume_threshold) |
-        (account_stats["txns_per_30d"] >= business_txn_threshold),
+        (account_stats["volume_per_30d"]  >= business_volume_threshold) &
+        (account_stats["txns_per_30d"]    >= business_txn_threshold)    &
+        (account_stats["avg_txn_amount"]  >= business_avg_txn_threshold),
         "business", "retail"
     )
 
     df = df.merge(
-        account_stats[["entity_segment", "volume_per_30d", "txns_per_30d"]],
+        account_stats[["entity_segment", "volume_per_30d", "txns_per_30d", "avg_txn_amount"]],
         on="account_id", how="left"
     )
     df.drop(columns=["_abs_amount"], inplace=True, errors="ignore")
@@ -146,8 +164,11 @@ def harden_predictions(df: pd.DataFrame) -> pd.DataFrame:
     print(f"[PostProcessing] Suppressed by rules:  {suppressed}")
     print(f"[PostProcessing] Final flags:          {after}")
     if "entity_segment" in df.columns:
-        print(f"[PostProcessing] Business accounts:    {(df['entity_segment']=='business').sum()} rows")
-        print(f"[PostProcessing] Retail accounts:      {(df['entity_segment']=='retail').sum()} rows")
+        biz_rows    = (df['entity_segment'] == 'business').sum()
+        retail_rows = (df['entity_segment'] == 'retail').sum()
+        print(f"[PostProcessing] Business rows:        {biz_rows}  "
+              f"(vol/30d >= 5L AND txns/30d >= 60 AND avg_txn >= 5K)")
+        print(f"[PostProcessing] Retail rows:          {retail_rows}")
 
     return df
 
