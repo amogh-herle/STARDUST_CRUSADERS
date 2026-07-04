@@ -22,7 +22,7 @@ analytics_root = Path(__file__).resolve().parents[2] / "phase8" / "analytics"
 # ---------------------------------------------------------------------------
 # Pick the assistant backend based on config
 # ---------------------------------------------------------------------------
-if settings.QWEN_ENABLED:
+if settings.LLM_PROVIDER == "qwen-local":
     from services.qwen_assistant_service import QwenAssistantService
 
     assistant_service = QwenAssistantService(

@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "gemini"
     CHAT_MODEL: str = "gemini-2.5-flash"
     REPORT_MODEL: str = "gemini-2.5-pro"
-    GEMINI_API_KEY: str = "AQ.Ab8RN6IuqqZlx50HrA8frxFCOBMkSsFHTIpRL8Gbh9q5bH8g-Q"
+    GEMINI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     CLAUDE_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
