@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from database import create_tables
+from seed import seed_database
 
 from routers.upload import router as upload_router
 from routers.accounts import router as accounts_router
@@ -28,6 +29,7 @@ from routers.transactions import router as transactions_router
 from routers.graph import router as graph_router
 from routers.investigations import router as investigations_router
 from routers.dashboard import dashboard_router, rings_router
+from routers.assistant import router as assistant_router
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     # Startup
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     await create_tables()   # no-op if tables already exist
+    await seed_database()
     print(f"✓ {settings.APP_NAME} started")
     print(f"✓ Docs: http://localhost:8000/docs")
     yield
@@ -77,6 +80,7 @@ app.include_router(graph_router,          prefix=PREFIX)
 app.include_router(investigations_router, prefix=PREFIX)
 app.include_router(dashboard_router,      prefix=PREFIX)
 app.include_router(rings_router,          prefix=PREFIX)
+app.include_router(assistant_router,      prefix=PREFIX)
 
 
 # ---------------------------------------------------------------------------

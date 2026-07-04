@@ -26,9 +26,8 @@ from typing import Optional
 from sqlalchemy import (
     Boolean, DateTime, Float, ForeignKey,
     Integer, String, Text, UniqueConstraint, Index,
-    ARRAY,
+    Uuid, JSON,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -94,7 +93,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     transaction_id: Mapped[Optional[str]] = mapped_column(String(30), index=True)
     account_id: Mapped[str] = mapped_column(
@@ -198,7 +197,7 @@ class FraudRingMember(Base):
     __tablename__ = "fraud_ring_members"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     ring_id: Mapped[str] = mapped_column(
         String(20), ForeignKey("fraud_rings.ring_id", ondelete="CASCADE"),
@@ -228,7 +227,7 @@ class Investigation(Base):
     __tablename__ = "investigations"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -243,7 +242,7 @@ class Investigation(Base):
     created_by: Mapped[str] = mapped_column(String(100), default="investigator")
 
     # Linked rings (stored as JSON array of ring_ids)
-    linked_ring_ids: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    linked_ring_ids: Mapped[Optional[list]] = mapped_column(JSON, default=list)
 
     # LLM-generated case narrative (Phase 11)
     case_narrative: Mapped[Optional[str]] = mapped_column(Text)
@@ -276,7 +275,7 @@ class RiskScoreHistory(Base):
     __tablename__ = "risk_score_history"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     account_id: Mapped[str] = mapped_column(
         String(20), ForeignKey("accounts.account_id", ondelete="CASCADE"),
@@ -292,7 +291,7 @@ class RiskScoreHistory(Base):
 
     model_version: Mapped[str] = mapped_column(String(20), default="1.0.0")
     # Features snapshot for explainability
-    feature_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB)
+    feature_snapshot: Mapped[Optional[dict]] = mapped_column(JSON)
 
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
@@ -313,10 +312,10 @@ class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     investigation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("investigations.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
@@ -325,7 +324,7 @@ class Report(Base):
     format: Mapped[str] = mapped_column(String(10), default="pdf")
     file_path: Mapped[Optional[str]] = mapped_column(String(500))
     # Full report content as JSON for API delivery
-    content: Mapped[Optional[dict]] = mapped_column(JSONB)
+    content: Mapped[Optional[dict]] = mapped_column(JSON)
 
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
@@ -342,10 +341,10 @@ class EvidenceItem(Base):
     __tablename__ = "evidence_items"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid, primary_key=True, default=uuid.uuid4
     )
     investigation_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("investigations.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )

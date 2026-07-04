@@ -1,57 +1,125 @@
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual Environment
+# =========================
+# Virtual Environments
+# =========================
 venv/
 env/
 .venv/
 
-# VS Code
+# =========================
+# IDE
+# =========================
 .vscode/
-
-# JetBrains
 .idea/
 
+# =========================
 # OS Files
+# =========================
 .DS_Store
 Thumbs.db
 
+# =========================
 # Logs
+# =========================
 *.log
 
+# =========================
+# Environment Variables
+# =========================
+.env
+
+# =========================
+# Testing
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =========================
 # Python Build
+# =========================
 build/
 dist/
 *.egg-info/
 
+# =========================
 # Jupyter
+# =========================
 .ipynb_checkpoints/
 
-# Environment Variables
-.env
+# =========================
+# Node
+# =========================
+node_modules/
+frontend/node_modules/
 
-# Testing
-.pytest_cache/
-.coverage
+# =========================
+# Database
+# =========================
+*.db
+*.sqlite
+*.sqlite3
 
-# Large Generated Datasets
-output/
-phase5/output/
-phase6/ingested/
-phase7/cleaned/
+# =========================
+# ML Models (Large Files)
+# =========================
+*.pkl
+*.joblib
+*.h5
+*.onnx
 
-# Generated Reports
-*.pdf
-*.xlsx
-*.csv
+# =========================
+# Generated Analytics
+# =========================
+phase8/analytics/account_graph.gexf
+phase8/analytics/account_graph.pkl
+phase8/analytics/investigator_case_report.html
+phase8/analytics
+# Optional generated reports
+phase8/analytics/*.pdf
 
-#images of statements
+data
+# =========================
+# Images
+# =========================
 *.png
 *.jpg
 *.jpeg
+*.pdf
+*.csv
+*.xlsx
+*.xls
+*.txt
+*.zip
 
-# Keep sample configs
-!requirements.txt
+
+# EXCEPT documentation images
+!docs/**/*.png
+!docs/**/*.jpg
+
+# =========================
+# Keep Important Files
+# =========================
 !README.md
+!requirements.txt
+!frontend/package.json
+!frontend/package-lock.json
+
+phase5/output/
+phase6/ingested*/
+phase7/cleaned/
+phase8/analytics_run*/
+phase8/analytics_test/
+phase8/phase8/
+
+backend/uploads/
+
+*.db
+*.pkl
+*.pdf

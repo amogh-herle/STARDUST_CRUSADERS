@@ -1,0 +1,2 @@
+file,extension,bank_detected,rows_parsed,rows_after_clean,parse_warnings,status
+AccountStmt_1228XXXXXX3352.pdf,.pdf,UCO Bank,218,218,"PDF table detected but invalid transaction table: 13 rows, 6 cols (bank=generic) | No tables — trying text fallbacks | Wrapped-narration parser: 218 txns | PDF: wrapped-narration parser | Bank: UCO Bank (ifsc_lookup:UCBA0001228) | date=date | nar=narration | dr=debit | cr=credit | bal=balance",ok

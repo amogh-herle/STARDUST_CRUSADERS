@@ -19,6 +19,7 @@ New in v2:
 import re
 import json
 import urllib.request
+import warnings as _warnings
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -213,7 +214,33 @@ def _keyword_score(col_name: str, keywords: list) -> int:
     return score
 
 
-def assign_column_roles_by_keywords(columns: list) -> dict:
+def _looks_like_amount_column(series) -> bool:
+    """
+    Sanity check for a column already matched to debit/credit/balance/
+    amount by keyword. Column NAME keyword matches can be spurious — e.g.
+    a "Value Dr" (Value Date) header contains "dr" and keyword-matches
+    the debit role, even though every value in it is a date. Reject the
+    match if the actual data looks like dates rather than amounts, so the
+    caller falls through to content-based detection instead.
+    """
+    try:
+        if not isinstance(series, pd.Series):
+            series = pd.Series(series)
+        sample = series.dropna().astype(str).str.strip()
+        sample = sample[sample != ""].head(20)
+        if len(sample) == 0:
+            return True  # nothing to contradict the keyword match
+        date_hits = sum(
+            1 for v in sample if any(p.match(v) for p in CONTENT_PATTERNS["date"])
+        )
+        if date_hits / len(sample) >= 0.5:
+            return False
+        return True
+    except Exception:
+        return True
+
+
+def assign_column_roles_by_keywords(columns: list, df: pd.DataFrame = None) -> dict:
     translated = {}
     for col in columns:
         col_str = str(col).strip()
@@ -224,6 +251,7 @@ def assign_column_roles_by_keywords(columns: list) -> dict:
                   "amount", "drcr"]
     assigned = {}
     used_cols: set = set()
+    amount_shaped_roles = {"balance", "debit", "credit", "amount"}
 
     for role in role_order:
         keywords = COLUMN_ROLE_KEYWORDS.get(role, [])
@@ -238,6 +266,15 @@ def assign_column_roles_by_keywords(columns: list) -> dict:
             score = _keyword_score(col_str, keywords)
             if score > best_score:
                 best_score, best_col = score, col
+        if (best_col and best_score > 0 and role in amount_shaped_roles
+                and df is not None and best_col in df.columns
+                and not _looks_like_amount_column(df[best_col])):
+            # Keyword matched the column NAME, but its actual values are
+            # date-shaped — this is exactly the false-positive pattern a
+            # scrambled/merged PDF-table header produces. Don't trust it;
+            # leave the role unassigned so content-based detection (Tier
+            # 2) gets a real chance to find the right column instead.
+            best_col, best_score = None, 0
         if best_col and best_score > 0:
             assigned[role] = best_col
             used_cols.add(best_col)
@@ -404,7 +441,7 @@ def assign_column_roles_by_position(df: pd.DataFrame, assigned: dict) -> dict:
 # Combined role detection (all 3 tiers)
 # ===========================================================================
 def assign_column_roles(columns: list, df: pd.DataFrame = None) -> dict:
-    roles = assign_column_roles_by_keywords(columns)
+    roles = assign_column_roles_by_keywords(columns, df)
     if df is not None:
         missing = [r for r, v in roles.items() if v is None and r != "ref"]
         if missing:
@@ -451,6 +488,13 @@ _OCR_DATE_FIXES = str.maketrans({
     "l": "1", "I": "1",
     "S": "5", "B": "8",
 })
+
+
+def _clean_datetime_candidate(candidate: str) -> str:
+    candidate = (candidate or "").strip()
+    candidate = re.sub(r"(?<=\d)[A-Z]{2,5}$", "", candidate)
+    candidate = re.sub(r"\s+[A-Z]{2,5}$", "", candidate)
+    return candidate.strip()
 
 # IDFC timestamps embed date+time: "15/05/25 10:20"
 _IDFC_DT_RE = re.compile(
@@ -518,8 +562,18 @@ def parse_date(val) -> str:
                 continue
 
     for candidate in (s, s_fixed):
+        candidate = _clean_datetime_candidate(candidate)
+        if not candidate:
+            continue
         try:
-            parsed = pd.to_datetime(candidate, dayfirst=True, errors="coerce", utc=False)
+            # This is the last-resort, "throw anything at pandas" parse —
+            # garbage input (stray OCR/word-position tokens like "5H1V")
+            # is expected and already handled by errors="coerce". Pandas
+            # still warns about its own upcoming timezone-handling change
+            # even in coerce mode, which is just noise here.
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore", FutureWarning)
+                parsed = pd.to_datetime(candidate, dayfirst=True, errors="coerce", utc=False)
         except Exception:
             continue
         if pd.notna(parsed) and 1990 <= parsed.year <= 2100:
