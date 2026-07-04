@@ -142,6 +142,16 @@ export async function getLedgerTrace(accountId: string): Promise<CytoscapeGraph>
   return res.json();
 }
 
+/**
+ * Fetch the full overview transaction graph (paginated by accounts count).
+ */
+export async function getFullGraph(limitAccounts: number = 10): Promise<CytoscapeGraph> {
+  const res = await fetch(`${BASE}/api/v1/graph/cytoscape-overview?limit_accounts=${limitAccounts}`);
+  if (!res.ok) throw new Error("Failed to fetch full overview graph");
+  return res.json();
+}
+
+
 export interface Transaction {
   id: string;
   transaction_id?: string;

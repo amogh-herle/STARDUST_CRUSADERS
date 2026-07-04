@@ -223,6 +223,113 @@ async def full_graph(
 
 
 # ---------------------------------------------------------------------------
+# Cytoscape Overview — returns Cytoscape-compatible nested-data format
+# used by the frontend incremental graph overview (top N accounts)
+# ---------------------------------------------------------------------------
+@router.get("/cytoscape-overview")
+async def cytoscape_overview(
+    limit_accounts: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns a Cytoscape.js-ready payload ({nodes: [{data:{...}}], edges: [{data:{...}}]})
+    for the top `limit_accounts` accounts by risk score.
+    This format matches the frontend CytoscapeGraph interface exactly.
+    """
+    # Fetch top accounts by risk score
+    q = select(Account).order_by(Account.risk_score.desc()).limit(limit_accounts)
+    accounts = (await db.execute(q)).scalars().all()
+
+    if not accounts:
+        return {"nodes": [], "edges": []}
+
+    account_ids = [a.account_id for a in accounts]
+
+    # Per-account transaction stats
+    stats_q = (
+        select(
+            Transaction.account_id,
+            func.count().label("txn_count"),
+        )
+        .where(Transaction.account_id.in_(account_ids))
+        .group_by(Transaction.account_id)
+    )
+    stats_rows = (await db.execute(stats_q)).all()
+    txn_counts = {r.account_id: int(r.txn_count or 0) for r in stats_rows}
+
+    def risk_tier(score: float) -> str:
+        if score >= 75: return "CRITICAL"
+        if score >= 50: return "HIGH"
+        if score >= 25: return "MEDIUM"
+        return "LOW"
+
+    # Build Cytoscape nodes
+    nodes = []
+    for acct in accounts:
+        score = float(acct.risk_score or 0)
+        nodes.append({
+            "data": {
+                "id": acct.account_id,
+                "label": acct.holder_name or acct.account_id,
+                "bank": acct.bank_name or "Unknown Bank",
+                "risk_score": score,
+                "risk_tier": risk_tier(score),
+                "role": acct.fraud_role or "unknown",
+                "is_seed": False,
+                "is_internal": True,
+                "txn_count": txn_counts.get(acct.account_id, 0),
+            }
+        })
+
+    # Build Cytoscape edges — internal transfers between overview accounts only
+    edge_q = (
+        select(
+            Transaction.account_id,
+            Transaction.counterparty_account_id,
+            Transaction.utr_ref,
+            Transaction.date,
+            Transaction.is_high_value_flag,
+            func.sum(Transaction.debit + Transaction.credit).label("total_amount"),
+        )
+        .where(
+            Transaction.account_id.in_(account_ids),
+            Transaction.counterparty_account_id.in_(account_ids),
+            Transaction.counterparty_account_id.isnot(None),
+        )
+        .group_by(
+            Transaction.account_id,
+            Transaction.counterparty_account_id,
+            Transaction.utr_ref,
+            Transaction.date,
+            Transaction.is_high_value_flag,
+        )
+    )
+    edge_rows = (await db.execute(edge_q)).all()
+
+    seen_pairs: set = set()
+    edges = []
+    for i, row in enumerate(edge_rows):
+        pair = tuple(sorted([row.account_id, row.counterparty_account_id]))
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+
+        risk_flag = "SUSPICIOUS" if row.is_high_value_flag else "NORMAL"
+        edges.append({
+            "data": {
+                "id": row.utr_ref or f"ov_edge_{i}",
+                "source": row.account_id,
+                "target": row.counterparty_account_id,
+                "amount": float(row.total_amount or 0),
+                "dates": [str(row.date)] if row.date else [],
+                "risk_flag": risk_flag,
+            }
+        })
+
+    return {"nodes": nodes, "edges": edges}
+
+
+# ---------------------------------------------------------------------------
 # Ledger trace — Load pre-generated Cytoscape JSON or fallback parse ledger CSV
 # ---------------------------------------------------------------------------
 @router.get("/ledger-trace/{account_id}")
