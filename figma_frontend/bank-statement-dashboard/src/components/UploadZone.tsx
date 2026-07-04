@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { uploadStatements, type UploadResult } from "@/lib/api";
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".csv", ".xlsx", ".xls", ".docx", ".png", ".jpg", ".jpeg"];
 
@@ -8,6 +9,8 @@ type QueuedFile = {
   file: File;
   error?: string;
 };
+
+type UploadState = "idle" | "uploading" | "done" | "error";
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -20,9 +23,16 @@ function isAccepted(file: File) {
   return ACCEPTED_EXTENSIONS.includes(ext);
 }
 
-export default function UploadZone({ onSubmit }: { onSubmit: (files: File[]) => void }) {
+export default function UploadZone({
+  onSubmit,
+}: {
+  onSubmit: (files: File[], result: UploadResult) => void;
+}) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<QueuedFile[]>([]);
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback((incoming: FileList | null) => {
@@ -40,8 +50,41 @@ export default function UploadZone({ onSubmit }: { onSubmit: (files: File[]) => 
 
   const validFiles = files.filter((f) => !f.error);
 
+  const handleAnalyze = async () => {
+    if (validFiles.length === 0) return;
+    setUploadState("uploading");
+    setUploadError(null);
+
+    // Simulate pipeline stage labels while the request is in flight
+    const stages = [
+      "Uploading files…",
+      "Running Phase 6 — parsing statements…",
+      "Running Phase 7 — cleaning data…",
+      "Running Phase 8 — analytics & risk scoring…",
+      "Finalising report…",
+    ];
+    let stageIdx = 0;
+    setProgress(stages[0]);
+    const interval = setInterval(() => {
+      stageIdx = Math.min(stageIdx + 1, stages.length - 1);
+      setProgress(stages[stageIdx]);
+    }, 4000);
+
+    try {
+      const result = await uploadStatements(validFiles.map((f) => f.file));
+      clearInterval(interval);
+      setUploadState("done");
+      onSubmit(validFiles.map((f) => f.file), result);
+    } catch (err) {
+      clearInterval(interval);
+      setUploadState("error");
+      setUploadError(err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
   return (
     <div className="w-full max-w-2xl mx-auto">
+      {/* Drop zone */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -53,10 +96,12 @@ export default function UploadZone({ onSubmit }: { onSubmit: (files: File[]) => 
           setIsDragging(false);
           addFiles(e.dataTransfer.files);
         }}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => uploadState === "idle" && inputRef.current?.click()}
         className={`cursor-pointer rounded-xl border-2 border-dashed p-12 text-center transition-colors ${
-          isDragging ? "border-accent bg-accent/5" : "border-slate-300 bg-white hover:border-slate-400"
-        }`}
+          isDragging
+            ? "border-accent bg-accent/5"
+            : "border-slate-300 bg-white hover:border-slate-400"
+        } ${uploadState === "uploading" ? "pointer-events-none opacity-60" : ""}`}
       >
         <input
           ref={inputRef}
@@ -72,6 +117,7 @@ export default function UploadZone({ onSubmit }: { onSubmit: (files: File[]) => 
         <p className="mt-1 text-xs text-slate-400">PDF, CSV, XLSX, DOCX, PNG, JPG</p>
       </div>
 
+      {/* File list */}
       {files.length > 0 && (
         <div className="mt-6 space-y-2">
           {files.map((qf) => (
@@ -86,26 +132,76 @@ export default function UploadZone({ onSubmit }: { onSubmit: (files: File[]) => 
                   {qf.error ? ` · ${qf.error}` : ""}
                 </p>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeFile(qf.file.name);
-                }}
-                className="ml-4 text-slate-400 hover:text-slate-600"
-                aria-label={`Remove ${qf.file.name}`}
-              >
-                ✕
-              </button>
+              {uploadState === "idle" && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeFile(qf.file.name);
+                  }}
+                  className="ml-4 text-slate-400 hover:text-slate-600"
+                  aria-label={`Remove ${qf.file.name}`}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
 
-          <button
-            onClick={() => onSubmit(validFiles.map((f) => f.file))}
-            disabled={validFiles.length === 0}
-            className="mt-2 w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            Analyze {validFiles.length > 0 ? `${validFiles.length} file${validFiles.length > 1 ? "s" : ""}` : ""}
-          </button>
+          {/* Analyze button / loading / error */}
+          {uploadState === "idle" && (
+            <button
+              onClick={handleAnalyze}
+              disabled={validFiles.length === 0}
+              className="mt-2 w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Analyze{" "}
+              {validFiles.length > 0
+                ? `${validFiles.length} file${validFiles.length > 1 ? "s" : ""}`
+                : ""}
+            </button>
+          )}
+
+          {uploadState === "uploading" && (
+            <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-600 flex items-center gap-3">
+              {/* Spinner */}
+              <svg
+                className="h-4 w-4 animate-spin text-accent shrink-0"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                />
+              </svg>
+              <span>{progress}</span>
+            </div>
+          )}
+
+          {uploadState === "error" && (
+            <div className="mt-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              <span className="font-medium">Pipeline error: </span>
+              {uploadError}
+              <button
+                onClick={() => {
+                  setUploadState("idle");
+                  setUploadError(null);
+                }}
+                className="ml-3 underline text-red-600 hover:text-red-800"
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

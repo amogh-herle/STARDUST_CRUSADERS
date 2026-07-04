@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # CORS — React dev server
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
 
     # File upload
     UPLOAD_DIR: str = "uploads"
@@ -33,7 +37,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "gemini"
     CHAT_MODEL: str = "gemini-2.5-flash"
     REPORT_MODEL: str = "gemini-2.5-pro"
-    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY: str = "AQ.Ab8RN6IuqqZlx50HrA8frxFCOBMkSsFHTIpRL8Gbh9q5bH8g-Q"
     OPENAI_API_KEY: str = ""
     CLAUDE_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""

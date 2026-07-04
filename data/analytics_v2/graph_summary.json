@@ -1,0 +1,10 @@
+{
+  "txn_graph_nodes": 6,
+  "txn_graph_edges": 7,
+  "account_graph_nodes": 6,
+  "account_graph_edges": 5,
+  "internal_account_nodes": 1,
+  "external_counterparty_nodes": 5,
+  "weakly_connected_comps": 1,
+  "density": 0.166667
+}
