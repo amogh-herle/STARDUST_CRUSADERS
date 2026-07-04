@@ -1,16 +1,39 @@
 """
 Assistant router for the AML Investigator Assistant.
+
+Supports two backends:
+  - Gemini/Claude (existing single-shot context path) — default
+  - Qwen3-8B (tool-calling loop via Ollama) — when QWEN_ENABLED=True
+
+Both services expose the same .ask() signature, so the route handler is
+identical regardless of which backend is active.
 """
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 
+from config import settings
 from schemas import AssistantChatRequest, AssistantChatResponse
-from services.assistant_service import AssistantService
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
 
 analytics_root = Path(__file__).resolve().parents[2] / "phase8" / "analytics"
-assistant_service = AssistantService(str(analytics_root))
+
+# ---------------------------------------------------------------------------
+# Pick the assistant backend based on config
+# ---------------------------------------------------------------------------
+if settings.QWEN_ENABLED:
+    from services.qwen_assistant_service import QwenAssistantService
+
+    assistant_service = QwenAssistantService(
+        analytics_root=str(analytics_root),
+        base_url=settings.QWEN_BASE_URL,
+        model_name=settings.QWEN_MODEL_NAME,
+    )
+else:
+    from services.assistant_service import AssistantService
+
+    assistant_service = AssistantService(str(analytics_root))
 
 
 @router.post("/chat", response_model=AssistantChatResponse)
