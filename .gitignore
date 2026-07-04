@@ -84,6 +84,7 @@ phase8/analytics
 # Optional generated reports
 phase8/analytics/*.pdf
 
+data
 # =========================
 # Images
 # =========================
