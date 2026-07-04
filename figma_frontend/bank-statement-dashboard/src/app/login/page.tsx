@@ -1,83 +1,72 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { login, register } from "@/lib/auth";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
+function LoginForm() {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [isRegister, setIsRegister] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const supabase = createClient();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get("error") === "auth_callback_failed") {
+      setError("Session expired. Please log in again.");
+    }
+  }, [searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMsg(null);
     setLoading(true);
 
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+    const result = await login(username, password);
 
-      if (error) throw error;
-
-      if (data.session) {
-        router.push("/");
-        router.refresh();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
-      setLoading(false);
+    if ("error" in result) {
+      setError(result.error);
+    } else {
+      router.push("/");
+      router.refresh();
     }
+
+    setLoading(false);
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMsg(null);
     setLoading(true);
 
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName || email,
-          },
-        },
-      });
-
-      if (error) throw error;
-
-      if (data.session) {
-        // Auto-login after registration
-        router.push("/");
-        router.refresh();
-      } else {
-        // Email confirmation required
-        setError(
-          "Registration successful! Please check your email to confirm your account."
-        );
-        setIsRegister(false);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
-    } finally {
+    if (username.length < 3) {
+      setError("Username must be at least 3 characters.");
       setLoading(false);
+      return;
     }
+
+    const result = await register(username, password, fullName);
+
+    if ("error" in result) {
+      setError(result.error);
+    } else {
+      router.push("/");
+      router.refresh();
+    }
+
+    setLoading(false);
   };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
-        {/* Logo/Header */}
+        {/* Header */}
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-foreground">CIDECODE</h1>
           <p className="mt-2 text-sm text-gray-600">
@@ -85,20 +74,21 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Login/Register Form */}
         <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
           <h2 className="mb-6 text-xl font-semibold text-foreground">
             {isRegister ? "Create Account" : "Sign In"}
           </h2>
 
           <form onSubmit={isRegister ? handleRegister : handleLogin}>
+            {/* Full Name — register only */}
             {isRegister && (
               <div className="mb-4">
                 <label
                   htmlFor="fullName"
                   className="mb-2 block text-sm font-medium text-gray-700"
                 >
-                  Full Name
+                  Full Name{" "}
+                  <span className="font-normal text-gray-400">(optional)</span>
                 </label>
                 <input
                   id="fullName"
@@ -111,24 +101,33 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* Username */}
             <div className="mb-4">
               <label
-                htmlFor="email"
+                htmlFor="username"
                 className="mb-2 block text-sm font-medium text-gray-700"
               >
-                Email
+                Username
               </label>
               <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
+                autoComplete="username"
+                autoFocus
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-                placeholder="investigator@cidecode.com"
+                placeholder="investigator01"
               />
+              {isRegister && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Minimum 3 characters, lowercase
+                </p>
+              )}
             </div>
 
+            {/* Password */}
             <div className="mb-6">
               <label
                 htmlFor="password"
@@ -143,15 +142,20 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
+                autoComplete={isRegister ? "new-password" : "current-password"}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 placeholder="••••••••"
               />
               {isRegister && (
-                <p className="mt-1 text-xs text-gray-500">
-                  Minimum 6 characters
-                </p>
+                <p className="mt-1 text-xs text-gray-500">Minimum 6 characters</p>
               )}
             </div>
+
+            {successMsg && (
+              <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                {successMsg}
+              </div>
+            )}
 
             {error && (
               <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -164,11 +168,7 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading
-                ? "Please wait..."
-                : isRegister
-                  ? "Register"
-                  : "Login"}
+              {loading ? "Please wait..." : isRegister ? "Register" : "Login"}
             </button>
           </form>
 
@@ -177,6 +177,7 @@ export default function LoginPage() {
               onClick={() => {
                 setIsRegister(!isRegister);
                 setError(null);
+                setSuccessMsg(null);
               }}
               className="text-sm text-accent hover:underline"
             >
@@ -192,5 +193,13 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
