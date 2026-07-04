@@ -34,16 +34,9 @@ class Settings(BaseSettings):
     PHASE7_CLEAN_SCRIPT: str = "../phase7/clean.py"
 
     # LLM and RAG assistant
-    LLM_PROVIDER: str = "gemini"
-    CHAT_MODEL: str = "gemini-2.5-flash"
-    REPORT_MODEL: str = "gemini-2.5-pro"
-    GEMINI_API_KEY: str = ""
-    OPENAI_API_KEY: str = ""
-    CLAUDE_API_KEY: str = ""
-    ANTHROPIC_API_KEY: str = ""
+    LLM_PROVIDER: str = "qwen-local"
 
     # Qwen3-8B local assistant (tool-calling mode via Ollama)
-    QWEN_ENABLED: bool = False       # flip to True to use Qwen instead of Gemini/Claude
     QWEN_BASE_URL: str = "http://localhost:11434"   # Ollama default
     QWEN_MODEL_NAME: str = "qwen3:8b"
 

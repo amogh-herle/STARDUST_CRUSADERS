@@ -1,0 +1,236 @@
+{
+  "nodes": [
+    {
+      "data": {
+        "id": "99572217148131",
+        "label": "Indian",
+        "original_risk_score": 32.8,
+        "propagated_risk_score": 59.7,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "HIGH"
+      }
+    },
+    {
+      "data": {
+        "id": "18306700003",
+        "label": NaN,
+        "original_risk_score": 32.2,
+        "propagated_risk_score": 24.6,
+        "bank_name": "IDFC FIRST Bank",
+        "risk_tier": "HIGH"
+      }
+    },
+    {
+      "data": {
+        "id": "8642666611469255",
+        "label": NaN,
+        "original_risk_score": 28.1,
+        "propagated_risk_score": 28.7,
+        "bank_name": "IDBI Bank",
+        "risk_tier": "MEDIUM"
+      }
+    },
+    {
+      "data": {
+        "id": "00869354051",
+        "label": NaN,
+        "original_risk_score": 27.4,
+        "propagated_risk_score": 20.9,
+        "bank_name": "IDFC FIRST Bank",
+        "risk_tier": "MEDIUM"
+      }
+    },
+    {
+      "data": {
+        "id": "17771917925",
+        "label": NaN,
+        "original_risk_score": 26.3,
+        "propagated_risk_score": 20.1,
+        "bank_name": "IDFC FIRST Bank",
+        "risk_tier": "MEDIUM"
+      }
+    },
+    {
+      "data": {
+        "id": "098030016134598",
+        "label": NaN,
+        "original_risk_score": 25.0,
+        "propagated_risk_score": 38.5,
+        "bank_name": "Yes Bank",
+        "risk_tier": "MEDIUM"
+      }
+    },
+    {
+      "data": {
+        "id": "92883409730",
+        "label": NaN,
+        "original_risk_score": 22.8,
+        "propagated_risk_score": 17.4,
+        "bank_name": "IDFC FIRST Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "24704559049070",
+        "label": "Indian",
+        "original_risk_score": 21.3,
+        "propagated_risk_score": 16.3,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "95773447976527",
+        "label": "Indian",
+        "original_risk_score": 20.6,
+        "propagated_risk_score": 40.3,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "72615533841078",
+        "label": "Indian",
+        "original_risk_score": 19.1,
+        "propagated_risk_score": 41.1,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "61577175569879",
+        "label": "Indian",
+        "original_risk_score": 19.0,
+        "propagated_risk_score": 14.5,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "2248145316",
+        "label": NaN,
+        "original_risk_score": 17.6,
+        "propagated_risk_score": 33.4,
+        "bank_name": "HDFC Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "43920027363506",
+        "label": "Indian",
+        "original_risk_score": 15.5,
+        "propagated_risk_score": 11.8,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "5065197534",
+        "label": NaN,
+        "original_risk_score": 15.4,
+        "propagated_risk_score": 11.8,
+        "bank_name": "HDFC Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "08874795659248",
+        "label": "Indian",
+        "original_risk_score": 14.5,
+        "propagated_risk_score": 11.1,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "50192424882238",
+        "label": "Indian",
+        "original_risk_score": 13.1,
+        "propagated_risk_score": 10.0,
+        "bank_name": "Bandhan Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "511520930733",
+        "label": NaN,
+        "original_risk_score": 11.7,
+        "propagated_risk_score": 8.9,
+        "bank_name": "Unknown Bank",
+        "risk_tier": "LOW"
+      }
+    },
+    {
+      "data": {
+        "id": "230214392299",
+        "label": NaN,
+        "original_risk_score": 7.9,
+        "propagated_risk_score": 6.0,
+        "bank_name": "Paytm Payments Bank",
+        "risk_tier": "LOW"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "data": {
+        "id": "rel_e1",
+        "source": "99572217148131",
+        "target": "8642666611469255",
+        "relationship_score": 6.5,
+        "relationship_type": "Weak Association",
+        "confidence": 91.1
+      }
+    },
+    {
+      "data": {
+        "id": "rel_e2",
+        "source": "99572217148131",
+        "target": "95773447976527",
+        "relationship_score": 11.2,
+        "relationship_type": "Weak Association",
+        "confidence": 86.1
+      }
+    },
+    {
+      "data": {
+        "id": "rel_e3",
+        "source": "99572217148131",
+        "target": "72615533841078",
+        "relationship_score": 12.9,
+        "relationship_type": "Weak Association",
+        "confidence": 87.0
+      }
+    },
+    {
+      "data": {
+        "id": "rel_e4",
+        "source": "098030016134598",
+        "target": "2248145316",
+        "relationship_score": 5.6,
+        "relationship_type": "Weak Association",
+        "confidence": 100.0
+      }
+    },
+    {
+      "data": {
+        "id": "rel_e5",
+        "source": "95773447976527",
+        "target": "72615533841078",
+        "relationship_score": 11.9,
+        "relationship_type": "Weak Association",
+        "confidence": 80.2
+      }
+    }
+  ]
+}

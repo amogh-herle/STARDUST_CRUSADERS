@@ -1,0 +1,153 @@
+{
+  "run_timestamp": "2026-07-05T01:47:38.008397",
+  "input_file": "cleaned_transactions.csv",
+  "rows_input": 14462,
+  "accounts": 18,
+  "graph": {
+    "txn_graph_nodes": 12687,
+    "txn_graph_edges": 13995,
+    "account_graph_nodes": 12687,
+    "account_graph_edges": 12768,
+    "internal_account_nodes": 18,
+    "external_counterparty_nodes": 12669,
+    "weakly_connected_comps": 6,
+    "density": 7.9e-05
+  },
+  "communities": 16,
+  "scc_components_with_cycles": 0,
+  "round_trips": 6,
+  "layering_chains": 0,
+  "fan_in": 14,
+  "fan_out": 18,
+  "smurfing": 13,
+  "odd_hours": 0,
+  "accounts_scored": 18,
+  "critical_accounts": 0,
+  "high_accounts": 2,
+  "medium_accounts": 4,
+  "trail_manifest": [
+    {
+      "account": "99572217148131",
+      "direction": "forward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_99572217148131_forward.csv"
+    },
+    {
+      "account": "99572217148131",
+      "direction": "forward_fifo",
+      "hops": 592,
+      "trails": 207,
+      "status": "ok",
+      "file": "trail_99572217148131_fifo.csv"
+    },
+    {
+      "account": "99572217148131",
+      "direction": "backward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_99572217148131_backward.csv"
+    },
+    {
+      "account": "18306700003",
+      "direction": "forward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_18306700003_forward.csv"
+    },
+    {
+      "account": "18306700003",
+      "direction": "forward_fifo",
+      "hops": 146,
+      "trails": 79,
+      "status": "ok",
+      "file": "trail_18306700003_fifo.csv"
+    },
+    {
+      "account": "18306700003",
+      "direction": "backward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_18306700003_backward.csv"
+    },
+    {
+      "account": "8642666611469255",
+      "direction": "forward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_8642666611469255_forward.csv"
+    },
+    {
+      "account": "8642666611469255",
+      "direction": "forward_fifo",
+      "hops": 547,
+      "trails": 421,
+      "status": "ok",
+      "file": "trail_8642666611469255_fifo.csv"
+    },
+    {
+      "account": "8642666611469255",
+      "direction": "backward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_8642666611469255_backward.csv"
+    },
+    {
+      "account": "00869354051",
+      "direction": "forward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_00869354051_forward.csv"
+    },
+    {
+      "account": "00869354051",
+      "direction": "forward_fifo",
+      "hops": 0,
+      "trails": 0,
+      "status": "no_credits",
+      "file": "trail_00869354051_fifo.csv"
+    },
+    {
+      "account": "00869354051",
+      "direction": "backward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_00869354051_backward.csv"
+    },
+    {
+      "account": "17771917925",
+      "direction": "forward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_17771917925_forward.csv"
+    },
+    {
+      "account": "17771917925",
+      "direction": "forward_fifo",
+      "hops": 136,
+      "trails": 75,
+      "status": "ok",
+      "file": "trail_17771917925_fifo.csv"
+    },
+    {
+      "account": "17771917925",
+      "direction": "backward",
+      "hops": 2,
+      "trails": 2,
+      "status": "ok",
+      "file": "trail_17771917925_backward.csv"
+    }
+  ],
+  "communities_risk_count": 16,
+  "rows_output": 14462,
+  "total_flagged_rows": 4362
+}
