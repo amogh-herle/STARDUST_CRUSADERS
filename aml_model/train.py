@@ -36,6 +36,9 @@ def main():
     parser.add_argument("--tune",          action="store_true")
     parser.add_argument("--contamination", type=float, default=0.03)
     parser.add_argument("--name",          default="isolation_forest")
+    parser.add_argument("--feature-list",  default=None,
+                        help="Path to a JSON file with a pruned list of feature names to use "
+                             "(output of prune_features.py). If omitted, uses all features.")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -54,7 +57,15 @@ def main():
     df_feat = fe.fit_transform(df)
 
     feature_cols = [c for c in FeatureEngineer.feature_columns() if c in df_feat.columns]
-    print(f"         Using {len(feature_cols)} features")
+
+    if args.feature_list:
+        with open(args.feature_list) as f:
+            pruned = json.load(f)
+        feature_cols = [c for c in pruned if c in df_feat.columns]
+        print(f"         Loaded pruned feature list -> {len(feature_cols)} features "
+              f"(from {args.feature_list})")
+    else:
+        print(f"         Using {len(feature_cols)} features (full set)")
 
     # ── STEP 3: Labels ───────────────────────────────────────────────────────
     labels = None
@@ -106,6 +117,9 @@ def main():
         "datetime", "narration", "channel", "debit", "credit", "balance",
         "counterparty_account", "counterparty_name", "utr_ref",
         "anomaly_score", "is_flagged", "risk_tier",
+        # columns needed by post_processing.py suppression rules
+        "counterparty_txn_freq", "narration_is_salary", "abs_amount",
+        "acc_median_amount",
     ] if c in df_feat.columns]
     df_feat[keep_cols].to_csv(out_path, index=False)
     print(f"[STEP 7] Scored transactions -> {out_path}")

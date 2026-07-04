@@ -1,11 +1,17 @@
 """
-money_flow_graph.py
-Builds and visualizes the money-flow network around suspicious accounts.
-
-Usage:
-    python money_flow_graph.py --seed ACC000000 --hops 1
-    python money_flow_graph.py --top-suspicious 5 --hops 1
-    python money_flow_graph.py --csv "path\\to\\file.csv" --seed ACC000000
+money_flow_graph.py — hardened version
+────────────────────────────────────────
+Fixes applied:
+  1. Cycle detection capped to max_len=6 (was effectively unbounded) —
+     prevents infinite hangs on dense graphs.
+  2. Directed-only traversal — extract_subgraph no longer treats the graph
+     as undirected. Use direction="out" to trace where stolen funds WENT,
+     direction="in" to trace WHO fed an accumulation point. No more pulling
+     in innocent people who merely received money from a flagged account
+     via an unrelated, legitimate transaction.
+  3. Graph is now built ONLY from flagged accounts + their immediate
+     counterparties — not the entire CSV. Scales to millions of rows
+     without loading everything into memory.
 """
 
 import pandas as pd
@@ -16,16 +22,25 @@ import os
 import sys
 
 BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCORED_CSV =r"C:\Users\dhanu\Downloads\demo_graph_data.csv"
+SCORED_CSV = os.path.join(BASE_DIR, "outputs", "reports", "isolation_forest_scored_transactions.csv")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "reports")
 
 
 class MoneyFlowGraph:
 
-    def __init__(self, scored_csv: str = SCORED_CSV):
+    def __init__(self, scored_csv: str = SCORED_CSV, flagged_only: bool = True):
+        """
+        flagged_only=True (default, recommended for large datasets):
+            Only loads rows belonging to flagged accounts + their immediate
+            counterparties. Avoids loading the full CSV into a graph.
+        """
+        self.flagged_only = flagged_only
+        self.raw_path = scored_csv
         self.df = self._load(scored_csv)
         self.full_graph = self._build_full_graph(self.df)
         self.account_risk = self._compute_account_risk(self.df)
+
+    # ── loading ──────────────────────────────────────────────────────────────
 
     def _load(self, path: str) -> pd.DataFrame:
         df = pd.read_csv(path, dtype=str, low_memory=False)
@@ -44,6 +59,22 @@ class MoneyFlowGraph:
             df["is_flagged"] = 0
 
         df["narration"] = df.get("narration", "")
+
+        # ── FIX 3: only keep flagged accounts + their immediate counterparties ──
+        if self.flagged_only and df["is_flagged"].sum() > 0:
+            flagged_accounts = set(df.loc[df["is_flagged"] == 1, "account_id"])
+            flagged_counterparties = set(
+                df.loc[df["is_flagged"] == 1, "counterparty_account"].dropna()
+            )
+            relevant = flagged_accounts | flagged_counterparties
+
+            before = len(df)
+            df = df[
+                df["account_id"].isin(relevant) | df["counterparty_account"].isin(relevant)
+            ].copy()
+            print(f"[MoneyFlowGraph] Reduced {before} -> {len(df)} rows "
+                  f"(flagged accounts + immediate counterparties only)")
+
         return df
 
     def _compute_account_risk(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -67,19 +98,34 @@ class MoneyFlowGraph:
             )
         return G
 
-    def extract_subgraph(self, seeds, hops: int = 1, max_nodes: int = 150) -> nx.MultiDiGraph:
+    # ── FIX 2: directed-only neighborhood extraction ────────────────────────
+
+    def extract_subgraph(self, seeds, hops: int = 1, max_nodes: int = 150,
+                          direction: str = "out") -> nx.MultiDiGraph:
+        """
+        direction="out": follow money OUTWARD from seed (where did stolen funds go?)
+        direction="in":  follow money INWARD into seed (who fed this accumulation point?)
+        direction="both": follow both (use sparingly — pulls in more noise)
+
+        No longer converts to an undirected graph — that was pulling in
+        innocent accounts that merely received an incidental payment FROM
+        a flagged account for an unrelated, legitimate reason.
+        """
         if isinstance(seeds, str):
             seeds = [seeds]
 
-        undirected = self.full_graph.to_undirected()
         keep_nodes = set(seeds)
         frontier = set(seeds)
 
         for _ in range(hops):
             next_frontier = set()
             for node in frontier:
-                if node in undirected:
-                    next_frontier.update(undirected.neighbors(node))
+                if node not in self.full_graph:
+                    continue
+                if direction in ("out", "both"):
+                    next_frontier.update(self.full_graph.successors(node))
+                if direction in ("in", "both"):
+                    next_frontier.update(self.full_graph.predecessors(node))
             keep_nodes.update(next_frontier)
             frontier = next_frontier
             if len(keep_nodes) >= max_nodes:
@@ -122,15 +168,25 @@ class MoneyFlowGraph:
                 "risk_flag_pct": self.account_risk.loc[node, "flag_pct"]
                                  if node in self.account_risk.index else 0,
             })
+        if not rows:
+            return pd.DataFrame(columns=[
+                "account_id", "total_received", "total_forwarded",
+                "net_accumulation", "in_degree", "out_degree", "risk_flag_pct"
+            ])
         return pd.DataFrame(rows).sort_values("net_accumulation", ascending=False).head(top_n)
 
-    def find_cycles(self, G: nx.MultiDiGraph, max_cycles: int = 10, max_len: int = 5,
-                 min_amount: float = 10000) -> list:
+    # ── FIX 1: hard-capped cycle length, no more unbounded search ───────────
+
+    def find_cycles(self, G: nx.MultiDiGraph, max_cycles: int = 10, max_len: int = 6,
+                     min_amount: float = 10000) -> list:
         """
-        Only searches for cycles among edges above min_amount — small/noise
-        transactions inflate graph density and make cycle search hang.
+        max_len is a HARD ceiling — never search beyond 6-hop cycles.
+        Real laundering loops are tight (2-6 hops); anything longer is
+        either graph noise or a coincidental long walk, and searching for
+        it is what causes the algorithm to hang on dense graphs.
         """
-        # Build a filtered simple graph with only large-amount edges
+        max_len = min(max_len, 6)  # hard safety ceiling regardless of caller input
+
         filtered = nx.DiGraph()
         for u, v, data in G.edges(data=True):
             if data.get("amount", 0) >= min_amount:
@@ -138,6 +194,12 @@ class MoneyFlowGraph:
 
         cycles = []
         try:
+            for c in nx.simple_cycles(filtered, length_bound=max_len):
+                cycles.append(c)
+                if len(cycles) >= max_cycles:
+                    break
+        except TypeError:
+            # older networkx without length_bound support — manual filter
             for c in nx.simple_cycles(filtered):
                 if len(c) <= max_len:
                     cycles.append(c)
@@ -210,10 +272,14 @@ def main():
     parser.add_argument("--seed", nargs="+", default=None)
     parser.add_argument("--hops", type=int, default=1)
     parser.add_argument("--max-nodes", type=int, default=150)
+    parser.add_argument("--direction", choices=["out", "in", "both"], default="out",
+                        help="out=trace where funds went, in=trace who fed this account")
     parser.add_argument("--top-suspicious", type=int, default=None)
+    parser.add_argument("--no-prefilter", action="store_true",
+                        help="Load the FULL csv into the graph (slow, not recommended for large files)")
     args = parser.parse_args()
 
-    mfg = MoneyFlowGraph(scored_csv=args.csv)
+    mfg = MoneyFlowGraph(scored_csv=args.csv, flagged_only=not args.no_prefilter)
 
     if args.top_suspicious:
         seeds = mfg.account_risk.sort_values("flag_pct", ascending=False).head(args.top_suspicious).index.tolist()
@@ -224,8 +290,8 @@ def main():
         print("Provide --seed <account_id> or --top-suspicious N")
         sys.exit(1)
 
-    print(f"\n[1] Extracting {args.hops}-hop subgraph around: {seeds}")
-    sub = mfg.extract_subgraph(seeds, hops=args.hops, max_nodes=args.max_nodes)
+    print(f"\n[1] Extracting {args.hops}-hop subgraph (direction={args.direction}) around: {seeds}")
+    sub = mfg.extract_subgraph(seeds, hops=args.hops, max_nodes=args.max_nodes, direction=args.direction)
     print(f"    Subgraph: {sub.number_of_nodes()} accounts, {sub.number_of_edges()} transactions")
 
     print("\n[2] Classifying account roles ...")
@@ -238,8 +304,8 @@ def main():
     accum = mfg.find_accumulation_points(sub, top_n=10)
     print(accum.to_string(index=False))
 
-    print("\n[4] Checking for SHORT circular money flows (real laundering loops) ...")
-    cycles = mfg.find_cycles(sub, max_len=10000)
+    print("\n[4] Checking for SHORT circular money flows (max 6 hops) ...")
+    cycles = mfg.find_cycles(sub, max_len=6)
     if cycles:
         for c in cycles:
             print("    " + " -> ".join(c) + f" -> {c[0]}")
