@@ -22,6 +22,36 @@ import networkx as nx
 from datetime import datetime
 
 
+def is_merchant(node_name: str) -> bool:
+    """Identify if a node is a merchant, payment gateway, utility, or bank name."""
+    name_upper = str(node_name).upper().strip()
+    if not name_upper or name_upper == "NAN" or name_upper == "NONE":
+        return True
+
+    # 1. Known merchants & payment aggregators
+    merchant_keywords = {
+        "AMAZON", "SWIGGY", "IRCTC", "FLIPKART", "ZOMATO", "UBER", "OLA",
+        "ZEPTO", "BLINKIT", "PAYTM", "PHONEPE", "GPAY", "GOOGLE PAY", "BHIM",
+        "CRED", "RAZORPAY", "CASHFREE", "PAYU", "BILLDESK", "PAYU@HDFCBANK",
+        "BDPG@HDFCBANK", "JIO", "AIRTEL", "NETFLIX", "SPOTIFY", "TATACLIQ"
+    }
+    for kw in merchant_keywords:
+        if kw in name_upper:
+            return True
+
+    # 2. Generic utility, fee, and system terms
+    utility_keywords = {
+        "HEAD OFFICE", "SELF", "CASH", "ATM", "25 NFS", "OPW", "MOB", 
+        "NEFT", "IMPS", "UPI", "RTGS", "UNKNOWN", "FEE", "CHARGE", "INTEREST",
+        "DECLINE", "MINIMUM BALANCE", "SMS"
+    }
+    for kw in utility_keywords:
+        if kw in name_upper:
+            return True
+
+    return False
+
+
 def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
     """
     Input : cleaned_transactions DataFrame (Phase 7 output)
@@ -29,8 +59,6 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
 
     Node attribute  is_internal=True  → account_id from the dataset
                     is_internal=False → external counterparty name (merchant, unknown)
-    money_trail.py respects this flag: BFS only follows is_internal nodes,
-    so traces don't dead-end into "Swiggy" or "IRCTC".
     """
     txn_graph     = nx.MultiDiGraph()
     account_graph = nx.DiGraph()
@@ -45,11 +73,13 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
             holder=meta.get("account_holder", ""),
             bank=meta.get("bank_name", ""),
             is_internal=True,
+            is_merchant=False,
         )
         account_graph.add_node(acc_id,
             holder=meta.get("account_holder", ""),
             bank=meta.get("bank_name", ""),
             is_internal=True,
+            is_merchant=False,
         )
 
     # Process transfer edges. Prefer counterparty_account for internal linkage;
@@ -57,10 +87,11 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
     transfer_df = df[df["debit"] > 0].copy()
 
     for row_idx, row in transfer_df.iterrows():
-        src = str(row["account_id"]).strip()
+        src = row["account_id"]  # Keep as native type (numpy.int64) to match internal node types
         dst = _counterparty_identity(row)
         if not dst:
             continue
+
         amt = float(row["debit"])
         ts = _parse_ts(row)
         utr = str(row.get("utr_ref", "")).strip()
@@ -68,11 +99,19 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
         chan = str(row.get("channel", "")).strip()
         date = str(row.get("date", "")).strip()
 
-        dst_is_internal = dst in internal_ids
+        dst_is_internal = False
+        for i_id in internal_ids:
+            if str(i_id).strip() == str(dst).strip():
+                dst_is_internal = True
+                dst = i_id
+                break
+
+        dst_is_merchant = not dst_is_internal and is_merchant(dst)
+
         if dst not in txn_graph:
-            txn_graph.add_node(dst, holder=dst, bank="UNKNOWN", is_internal=dst_is_internal)
+            txn_graph.add_node(dst, holder=dst, bank="UNKNOWN", is_internal=dst_is_internal, is_merchant=dst_is_merchant)
         if dst not in account_graph:
-            account_graph.add_node(dst, holder=dst, bank="UNKNOWN", is_internal=dst_is_internal)
+            account_graph.add_node(dst, holder=dst, bank="UNKNOWN", is_internal=dst_is_internal, is_merchant=dst_is_merchant)
 
         edge_attrs = dict(
             amount=amt,
@@ -84,6 +123,56 @@ def build_graphs(df: pd.DataFrame) -> tuple[nx.MultiDiGraph, nx.DiGraph]:
             account_id=src,
             row_idx=int(row_idx),
             dst_is_internal=dst_is_internal,
+        )
+        txn_graph.add_edge(src, dst, **edge_attrs)
+
+        if account_graph.has_edge(src, dst):
+            account_graph[src][dst]["total_amount"] += amt
+            account_graph[src][dst]["txn_count"] += 1
+            account_graph[src][dst]["row_indices"].append(int(row_idx))
+        else:
+            account_graph.add_edge(src, dst, total_amount=amt, txn_count=1, row_indices=[int(row_idx)])
+
+    # Process credit transfer edges (inflows to internal accounts from external accounts)
+    credit_df = df[df["credit"] > 0].copy()
+    for row_idx, row in credit_df.iterrows():
+        dst = row["account_id"]  # recipient (internal)
+        src = _counterparty_identity(row)  # sender (could be external)
+        if not src:
+            continue
+        # If the sender is internal, we already captured this from the sender's debit row
+        src_is_internal = False
+        for i_id in internal_ids:
+            if str(i_id).strip() == str(src).strip():
+                src_is_internal = True
+                break
+        if src_is_internal:
+            continue
+
+        amt = float(row["credit"])
+        ts = _parse_ts(row)
+        utr = str(row.get("utr_ref", "")).strip()
+        nar = str(row.get("narration", "")).strip()
+        chan = str(row.get("channel", "")).strip()
+        date = str(row.get("date", "")).strip()
+
+        src_is_merchant = is_merchant(src)
+
+        if src not in txn_graph:
+            txn_graph.add_node(src, holder=src, bank="UNKNOWN", is_internal=False, is_merchant=src_is_merchant)
+        if src not in account_graph:
+            account_graph.add_node(src, holder=src, bank="UNKNOWN", is_internal=False, is_merchant=src_is_merchant)
+
+        edge_attrs = dict(
+            amount=amt,
+            timestamp=ts,
+            date=date,
+            utr_ref=utr,
+            narration=nar,
+            channel=chan,
+            account_id=src,
+            row_idx=int(row_idx),
+            dst_is_internal=True,
         )
         txn_graph.add_edge(src, dst, **edge_attrs)
 

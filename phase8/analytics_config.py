@@ -8,7 +8,7 @@ can generalise across unknown judge datasets.
 
 # Money trail / fund tracing
 TRAIL_MAX_HOPS = 8
-TRAIL_MIN_MATCH_RATIO = 0.65
+TRAIL_MIN_MATCH_RATIO = 0.10
 TRAIL_MAX_HOP_HOURS = 72
 
 # Round-trip detection

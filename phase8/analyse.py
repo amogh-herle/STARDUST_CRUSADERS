@@ -43,7 +43,7 @@ from pattern_detectors import (
 )
 from community import detect_communities, detect_scc_cycles, compute_community_risk
 from aml_inference import get_account_isolation_scores
-from money_trail      import trace_forward, trace_backward
+from money_trail      import trace_forward, trace_backward, trace_forward_fifo, trace_backward_fifo, generate_investigator_ledger
 from reporting       import generate_investigator_report
 from risk_scorer      import analyse_beneficiaries, compute_risk_scores, compute_graph_metrics
 from analytics_config import ANALYTICS_FLAG_COLS
@@ -216,9 +216,21 @@ def run_analytics(
     top_accounts = risk_df.head(top_trails)["account_id"].tolist()
     trail_manifest = []
 
+    # Create risk scores dictionary for ledger generation
+    risk_scores_dict = {}
+    if not risk_df.empty:
+        for _, r in risk_df.iterrows():
+            risk_scores_dict[str(r["account_id"])] = str(r["risk_tier"])
+
+    all_fwd_trails = []
+
     for acc_id in top_accounts:
-        # Forward
+        # Generate investigator ledger
+        generate_investigator_ledger(str(acc_id), df, out_dir, risk_scores_dict)
+
+        # Forward (graph-based, requires Change 1 fix)
         fwd_trails = trace_forward(acc_id, txn_graph, df)
+        all_fwd_trails.extend(fwd_trails)
         fwd_rows   = [r for t in fwd_trails for r in t.to_records()]
         fwd_path   = os.path.join(trails_dir, f"trail_{acc_id}_forward.csv")
         pd.DataFrame(fwd_rows, columns=_trail_cols()).to_csv(fwd_path, index=False)
@@ -227,11 +239,30 @@ def run_analytics(
             "direction": "forward",
             "hops":      len(fwd_rows),
             "trails":    len(fwd_trails),
-            "status":    "ok" if fwd_rows else "no_internal_counterparties",
+            "status":    "ok" if fwd_rows else "no_hops",
             "file":      os.path.basename(fwd_path),
         })
 
-        # Backward
+        # Forward FIFO (balance-based, hackathon-compliant)
+        fifo_trails = trace_forward_fifo(str(acc_id), df)
+        print(f"            DEBUG FIFO {acc_id}: df.account_id.dtype={df['account_id'].dtype}, matches={len(df[df['account_id'] == acc_id])}, trails={len(fifo_trails)}")
+        fifo_rows   = [r for t in fifo_trails for r in t.to_records()]
+        print(f"            DEBUG FIFO {acc_id}: {len(fifo_trails)} trails, {len(fifo_rows)} rows")
+        fifo_path   = os.path.join(trails_dir, f"trail_{acc_id}_fifo.csv")
+        pd.DataFrame(fifo_rows, columns=_trail_cols()).to_csv(fifo_path, index=False)
+        trail_manifest.append({
+            "account":   acc_id,
+            "direction": "forward_fifo",
+            "hops":      len(fifo_rows),
+            "trails":    len(fifo_trails),
+            "status":    "ok" if fifo_rows else "no_credits",
+            "file":      os.path.basename(fifo_path),
+        })
+
+        # Backward (heuristic beneficiary-similarity walk, now fixed —
+        # see _build_tx_index bugfix; previously always returned 0 rows
+        # for every account because credit-row amounts were silently
+        # read from the `debit` column)
         bwd_trails = trace_backward(acc_id, txn_graph, df)
         bwd_rows   = [r for t in bwd_trails for r in t.to_records()]
         bwd_path   = os.path.join(trails_dir, f"trail_{acc_id}_backward.csv")
@@ -241,11 +272,33 @@ def run_analytics(
             "direction": "backward",
             "hops":      len(bwd_rows),
             "trails":    len(bwd_trails),
-            "status":    "ok" if bwd_rows else "no_internal_counterparties",
+            "status":    "ok" if bwd_rows else "no_hops",
             "file":      os.path.basename(bwd_path),
         })
 
+        # Backward FIFO (balance-based, hackathon-compliant): for every
+        # outgoing debit, which earlier credit(s) actually funded it.
+        bwd_fifo_trails = trace_backward_fifo(str(acc_id), df)
+        bwd_fifo_rows   = [r for t in bwd_fifo_trails for r in t.to_records()]
+        bwd_fifo_path   = os.path.join(trails_dir, f"trail_{acc_id}_backward_fifo.csv")
+        pd.DataFrame(bwd_fifo_rows, columns=_trail_cols()).to_csv(bwd_fifo_path, index=False)
+        trail_manifest.append({
+            "account":   acc_id,
+            "direction": "backward_fifo",
+            "hops":      len(bwd_fifo_rows),
+            "trails":    len(bwd_fifo_trails),
+            "status":    "ok" if bwd_fifo_rows else "no_debits",
+            "file":      os.path.basename(bwd_fifo_path),
+        })
+
     report["trail_manifest"] = trail_manifest
+
+    # Export investigator-grade money trail outputs
+    try:
+        from money_trail import generate_money_trail_outputs
+        generate_money_trail_outputs(out_dir, df, risk_df, txn_graph, account_graph, top_trails)
+    except Exception as exc:
+        print(f"        Money trail output generation failed: {exc}")
 
     # Compute community-level risk after account scoring
     try:
@@ -300,6 +353,20 @@ def run_analytics(
     # 4. Risk scores and graph metrics
     risk_df.to_csv(os.path.join(out_dir, "risk_scores.csv"), index=False)
     graph_metrics_df.to_csv(os.path.join(out_dir, "graph_metrics.csv"), index=False)
+
+    # 4.1 Build Suspicious Network Graph (Cytoscape JSON)
+    try:
+        from suspicious_network import build_suspicious_network
+        build_suspicious_network(out_dir, txn_graph, account_graph, df, risk_df)
+    except Exception as exc:
+        print(f"        Suspicious network graph build failed: {exc}")
+
+    # 4.2 Build Relationship Network (CSV, JSON, summaries)
+    try:
+        from relationship_engine import analyse_relationships
+        analyse_relationships(out_dir, df, txn_graph, account_graph, risk_df)
+    except Exception as exc:
+        print(f"        Relationship network build failed: {exc}")
 
     # 5. Graph summary
     with open(os.path.join(out_dir, "graph_summary.json"), "w") as f:
