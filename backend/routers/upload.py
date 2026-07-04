@@ -32,6 +32,56 @@ _job_status: dict[str, dict] = {}
 SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".pdf", ".png", ".jpg", ".jpeg"}
 
 
+@router.get("/analytics-status")
+async def get_analytics_status():
+    """
+    Return a summary of the latest Phase 8 analytics run so the frontend
+    can show a quick overview without calling the full assistant.
+    """
+    import json
+    from pathlib import Path
+    project_root = Path(__file__).resolve().parents[2]
+    analytics_dir = project_root / "data" / "analytics_v2"
+    report_path = analytics_dir / "analytics_report.json"
+    risk_path = analytics_dir / "risk_scores.csv"
+
+    if not report_path.exists():
+        return {"status": "no_data", "message": "No analytics run yet. Upload a statement first."}
+
+    with report_path.open() as f:
+        report = json.load(f)
+
+    top_accounts = []
+    if risk_path.exists():
+        try:
+            df = pd.read_csv(risk_path, dtype=str)
+            df["risk_score"] = pd.to_numeric(df["risk_score"], errors="coerce").fillna(0)
+            top_accounts = (
+                df.sort_values("risk_score", ascending=False)
+                  .head(5)[["account_id", "account_holder", "risk_score", "risk_tier", "active_patterns"]]
+                  .to_dict(orient="records")
+            )
+        except Exception:
+            pass
+
+    return {
+        "status": "ready",
+        "run_timestamp": report.get("run_timestamp"),
+        "accounts": report.get("accounts", 0),
+        "critical_accounts": report.get("critical_accounts", 0),
+        "high_accounts": report.get("high_accounts", 0),
+        "medium_accounts": report.get("medium_accounts", 0),
+        "round_trips": report.get("round_trips", 0),
+        "layering_chains": report.get("layering_chains", 0),
+        "fan_in": report.get("fan_in", 0),
+        "fan_out": report.get("fan_out", 0),
+        "smurfing": report.get("smurfing", 0),
+        "odd_hours": report.get("odd_hours", 0),
+        "communities": report.get("communities", 0),
+        "top_accounts": top_accounts,
+    }
+
+
 @router.post("/", response_model=UploadResponse)
 async def upload_statements(
     background_tasks: BackgroundTasks,
@@ -96,49 +146,106 @@ async def upload_statements(
 
 
 def _run_pipeline(upload_dir: str, upload_id: str, warnings: list) -> tuple:
-    """Run Phase 6 + Phase 7 as subprocess calls."""
-    ingested_dir = os.path.join(upload_dir, "ingested")
-    cleaned_dir  = os.path.join(upload_dir, "cleaned")
+    """Run Phase 6 + Phase 7 + Phase 8 as subprocess calls."""
+    import sys
+    from pathlib import Path
+
+    # Always use absolute paths — phase6/7/8 run with different cwd
+    upload_dir   = str(Path(upload_dir).resolve())
+    ingested_dir = str(Path(upload_dir) / "ingested")
+    cleaned_dir  = str(Path(upload_dir) / "cleaned")
+
+    # Resolve python executable (use same interpreter as current process)
+    python_exe = sys.executable
+
+    # Resolve project root (backend/ is one level below project root)
+    project_root = Path(__file__).resolve().parents[2]
+
+    phase6_script = str(project_root / "phase6" / "ingest.py")
+    phase7_script = str(project_root / "phase7" / "clean.py")
+    phase8_script = str(project_root / "phase8" / "analyse.py")
+    analytics_out = str(project_root / "data" / "analytics_v2")
 
     # Phase 6: ingest
     try:
         result = subprocess.run(
-            ["python3", settings.PHASE6_INGEST_SCRIPT,
+            [python_exe, phase6_script,
              "--input", upload_dir,
              "--out-dir", ingested_dir],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=120,
+            cwd=str(project_root / "phase6"),
         )
         if result.returncode != 0:
-            warnings.append(f"Ingestion warning: {result.stderr[:200]}")
+            warnings.append(f"Ingestion warning: {result.stderr[:300]}")
+        # Log stdout for debugging even on success
+        if result.stdout:
+            print(f"[Phase6 stdout] {result.stdout[-500:]}")
+        if result.stderr:
+            print(f"[Phase6 stderr] {result.stderr[-500:]}")
+    except subprocess.TimeoutExpired:
+        warnings.append("Ingestion timed out after 120s")
+        return None, None, {}
     except Exception as e:
         warnings.append(f"Ingestion error: {e}")
         return None, None, {}
 
     ingested_csv = os.path.join(ingested_dir, "ingested_transactions.csv")
     if not os.path.exists(ingested_csv):
-        warnings.append("Ingestion produced no output")
+        # Check for a per-file report to understand why
+        report_csv = os.path.join(ingested_dir, "ingestion_report.csv")
+        if os.path.exists(report_csv):
+            try:
+                rep = pd.read_csv(report_csv)
+                for _, row in rep.iterrows():
+                    if row.get("status") != "ok" or row.get("rows_after_clean", 0) == 0:
+                        warnings.append(
+                            f"Phase6 [{row.get('file')}]: status={row.get('status')} "
+                            f"reason={str(row.get('parse_warnings',''))[:200]}"
+                        )
+            except Exception:
+                pass
+        if not warnings or not any("Phase6" in w for w in warnings):
+            warnings.append("Ingestion produced no output — file may be unsupported or parsing failed")
         return None, None, {}
 
     # Phase 7: clean
     try:
         result = subprocess.run(
-            ["python3", settings.PHASE7_CLEAN_SCRIPT,
+            [python_exe, phase7_script,
              "--input", ingested_csv,
              "--out-dir", cleaned_dir],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=120,
+            cwd=str(project_root / "phase7"),
         )
         if result.returncode != 0:
-            warnings.append(f"Cleaning warning: {result.stderr[:200]}")
+            warnings.append(f"Cleaning warning: {result.stderr[:300]}")
     except Exception as e:
         warnings.append(f"Cleaning error: {e}")
         return ingested_csv, None, {}
 
     cleaned_csv = os.path.join(cleaned_dir, "cleaned_transactions.csv")
+
     rows_ingested = 0
     try:
         rows_ingested = len(pd.read_csv(ingested_csv))
     except Exception:
         pass
+
+    # Phase 8: analytics — writes outputs to data/analytics_v2/
+    if os.path.exists(cleaned_csv):
+        try:
+            os.makedirs(analytics_out, exist_ok=True)
+            result = subprocess.run(
+                [python_exe, phase8_script,
+                 "--input", cleaned_csv,
+                 "--out-dir", analytics_out],
+                capture_output=True, text=True, timeout=300,
+                cwd=str(project_root / "phase8"),
+            )
+            if result.returncode != 0:
+                warnings.append(f"Analytics warning: {result.stderr[:300]}")
+        except Exception as e:
+            warnings.append(f"Analytics error: {e}")
 
     return ingested_csv, cleaned_csv, {"rows_ingested": rows_ingested}
 
