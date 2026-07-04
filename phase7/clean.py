@@ -15,6 +15,7 @@ Output directory contains:
                                     made during cleaning (what, why, before/after)
   suspect_accounts.csv           ← accounts with balance integrity issues
   cleaning_report.json           ← machine-readable full audit trail
+  quality_report.json            ← quality-assessment + duplicate-rate stats only
   cleaning_summary.txt           ← human-readable narrative summary
 
 Design principle: NOTHING is silently dropped.
@@ -27,7 +28,8 @@ Pipeline order (matches the Phase 7 architecture diagram exactly):
 
   1. Data Standardizer   — dates, amounts, narration/channel text, account IDs
   2. Duplicate Detector   — exact removal, near/UTR flagging
-  3. Data Validator       — transaction-type, balance continuity,
+  3. Data Validator       — transaction-type, failed-transaction detection,
+                             balance continuity (MINOR/MAJOR mismatch),
                              counterparty checks, outliers, velocity,
                              narration-integrity
   4. Missing Value Handler
@@ -55,6 +57,7 @@ from validator        import (
     clean_amounts,
     normalise_text_fields,
     validate_transaction_types,
+    flag_failed_transactions,
     validate_balance_continuity,
     validate_counterparties,
     flag_statistical_outliers,
@@ -101,11 +104,14 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     df["is_utr_collision"]     = False
     df["is_multi_file_collision"] = False
     df["is_balance_breach"]    = False
+    df["is_balance_mismatch_minor"] = False
+    df["is_balance_mismatch_major"] = False
     df["is_high_value_flag"]   = False
     df["is_velocity_flag"]     = False
     df["is_self_transfer"]     = False
     df["is_malformed_ifsc"]    = False
     df["is_invalid_transaction"] = False
+    df["is_failed_transaction"] = False
     df["is_ocr_row"]           = df["source_format"].isin(["image"])
 
     # ══════════════════════════════════════════════════════════════════════
@@ -169,11 +175,16 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
         })
 
     report["deduplication"] = dedup_report
-    print(f"      Exact dupes removed : {dedup_report['exact_duplicates_found']}")
+    print(f"      Exact dupes removed : {dedup_report['exact_duplicates_found']} "
+          f"({dedup_report.get('exact_duplicate_rate', 0):.1%} of input rows)")
     print(f"      Near dupes flagged  : {dedup_report['near_duplicates_flagged']}")
     print(f"      UTR collisions      : {dedup_report['utr_collisions_flagged']}")
     print(f"      Multi-file key collisions (flagged, NOT removed): "
           f"{dedup_report['multi_file_collisions_flagged']}")
+    print(f"      Possible duplicates (near+UTR+multi-file, all flagged not removed): "
+          f"{dedup_report.get('possible_duplicate_rate', 0):.1%} of input rows")
+    if dedup_report.get("high_duplicate_rate_warning"):
+        print(f"      ⚠️  {dedup_report.get('high_duplicate_rate_warning_message', 'HIGH_DUPLICATE_RATE_WARNING')}")
 
     # ══════════════════════════════════════════════════════════════════════
     # MODULE 3 — DATA VALIDATOR
@@ -187,7 +198,17 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     print(f"          Invalid (debit&credit both set): {txn_type_report['invalid_transaction_rows']}")
     print(f"          Both negative                  : {txn_type_report['both_negative_rows']}")
 
-    print("      3b. Balance continuity ...")
+    print("      3b. Failed-transaction detection ...")
+    df, failed_txn_report, failed_txn_actions = flag_failed_transactions(df)
+    all_actions.extend(failed_txn_actions)
+    report["failed_transaction_detection"] = failed_txn_report
+    print(f"          Failed/declined/reversed/etc. rows (flagged, not removed): "
+          f"{failed_txn_report['failed_transaction_rows']}")
+    if failed_txn_report["failed_transaction_keyword_counts"]:
+        for kw, cnt in failed_txn_report["failed_transaction_keyword_counts"].items():
+            print(f"             {kw}: {cnt}")
+
+    print("      3c. Balance continuity ...")
     df, balance_report, balance_actions = validate_balance_continuity(df)
     all_actions.extend(balance_actions)
     balance_review_accounts = balance_report.get(
@@ -203,8 +224,10 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     report["balance_validation"]["n_suspect_accounts"] = len(balance_review_accounts)
     report["balance_validation"]["n_balance_untracked_accounts"] = len(untracked_accounts)
     print(f"          Accounts checked     : {balance_report['accounts_checked']}")
-    print(f"          Accounts w/ breaches : {balance_report['accounts_with_breaches']}")
-    print(f"          Breach rows          : {balance_report['total_breach_rows']}")
+    print(f"          Accounts w/ mismatches : {balance_report['accounts_with_breaches']}")
+    print(f"          Mismatch rows (total) : {balance_report['total_breach_rows']}")
+    print(f"            MINOR (<=₹5, flagged): {balance_report['total_minor_mismatch_rows']}")
+    print(f"            MAJOR (>₹5, flagged) : {balance_report['total_major_mismatch_rows']}")
     if untracked_accounts:
         print(f"          ⚙  BALANCE UNTRACKED : {len(untracked_accounts)} account(s) — "
               f"balance column doesn't move despite real transactions; "
@@ -218,14 +241,14 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
             print(f"             {sa['account_id']} — {sa['breach_ratio']*100:.0f}% breach "
                   f"({sa['breach_rows']}/{sa['total_rows']}) [{sa['severity']}]")
 
-    print("      3c. Counterparty validation ...")
+    print("      3d. Counterparty validation ...")
     df, cp_report, cp_actions = validate_counterparties(df)
     all_actions.extend(cp_actions)
     report["counterparty_validation"] = cp_report
     print(f"          Self-transfers flagged : {cp_report['self_transfers_flagged']}")
     print(f"          Malformed IFSC flagged : {cp_report['malformed_ifsc_flagged']}")
 
-    print("      3d. Statistical outliers + velocity check ...")
+    print("      3e. Statistical outliers + velocity check ...")
     df, outlier_report, outlier_actions = flag_statistical_outliers(df)
     df, velocity_report, velocity_actions = flag_velocity_bursts(df)
     all_actions.extend(outlier_actions)
@@ -237,7 +260,7 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     if velocity_report["velocity_accounts_flagged"] > 0:
         print(f"          ⚠  Velocity accounts : {velocity_report['velocity_accounts_flagged']}")
 
-    print("      3e. Narration integrity ...")
+    print("      3f. Narration integrity ...")
     df, narr_report, narr_actions = flag_empty_narrations(df)
     all_actions.extend(narr_actions)
     report["narration_integrity"] = narr_report
@@ -286,7 +309,8 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
         cleaned["is_velocity_flag"].astype(bool) |
         cleaned["is_self_transfer"].astype(bool) |
         cleaned["is_malformed_ifsc"].astype(bool) |
-        cleaned["is_invalid_transaction"].astype(bool)
+        cleaned["is_invalid_transaction"].astype(bool) |
+        cleaned["is_failed_transaction"].astype(bool)
     )
     report["rows_with_any_flag"] = int(any_flag.sum())
     report["rows_fully_clean"]   = int((~any_flag).sum())
@@ -338,7 +362,8 @@ def _write_outputs(cleaned, dedup_audit, df_full, all_actions,
         cleaned["is_velocity_flag"].astype(bool) |
         cleaned["is_self_transfer"].astype(bool) |
         cleaned["is_malformed_ifsc"].astype(bool) |
-        cleaned["is_invalid_transaction"].astype(bool)
+        cleaned["is_invalid_transaction"].astype(bool) |
+        cleaned["is_failed_transaction"].astype(bool)
     )
     flagged_df = cleaned[any_flag_mask].copy()
 
@@ -348,13 +373,15 @@ def _write_outputs(cleaned, dedup_audit, df_full, all_actions,
         if flags:
             reasons.append(flags)
         if row.get("is_duplicate"):
-            reasons.append("NEAR_DUPLICATE: same account/date/amounts, different narration")
+            reasons.append("POSSIBLE_DUPLICATE: same account/date/amounts + narration similarity >=95%")
         if row.get("is_utr_collision"):
-            reasons.append("UTR_COLLISION: same reference number on a non-matching-pair row")
+            reasons.append("POSSIBLE_DUPLICATE (UTR_COLLISION): same reference number on a non-matching-pair row")
         if row.get("is_multi_file_collision"):
-            reasons.append("MULTI_FILE_KEY_COLLISION: 3+ different source files match the exact same key — reviewed, not auto-removed")
-        if row.get("is_balance_breach"):
-            reasons.append("BALANCE_BREACH: balance does not reconcile with prior row")
+            reasons.append("POSSIBLE_DUPLICATE (MULTI_FILE_KEY_COLLISION): 3+ different source files match the exact same key — reviewed, not auto-removed")
+        if row.get("is_balance_mismatch_minor"):
+            reasons.append("BALANCE_MISMATCH_MINOR: balance gap <= ₹5 vs. prior row")
+        if row.get("is_balance_mismatch_major"):
+            reasons.append("BALANCE_MISMATCH_MAJOR: balance gap > ₹5 vs. prior row — possible tamper or OCR error")
         if row.get("is_high_value_flag"):
             reasons.append("HIGH_VALUE_OUTLIER: amount exceeds 3×IQR for this account")
         if row.get("is_velocity_flag"):
@@ -365,6 +392,8 @@ def _write_outputs(cleaned, dedup_audit, df_full, all_actions,
             reasons.append("MALFORMED_IFSC: counterparty IFSC fails structural check")
         if row.get("is_invalid_transaction"):
             reasons.append("INVALID_TRANSACTION: debit and credit both set on one row")
+        if row.get("is_failed_transaction"):
+            reasons.append("FAILED_TRANSACTION: narration/channel/status indicates the transaction did not settle (failed/declined/timeout/reversed/cancelled/rollback)")
         if row.get("is_ocr_row"):
             reasons.append("OCR_SOURCE: lower data confidence (scanned image)")
         return " | ".join(reasons)
@@ -414,9 +443,26 @@ def _write_outputs(cleaned, dedup_audit, df_full, all_actions,
                  columns=["account_id","flatline_ratio","stuck_rows","txn_rows_checked","total_rows"]
                  ).to_csv(os.path.join(out_dir, "balance_untracked_accounts.csv"), index=False)
 
-    # 7. cleaning_report.json
+    # 7. cleaning_report.json — full machine-readable audit trail
     with open(os.path.join(out_dir, "cleaning_report.json"), "w") as f:
         json.dump(report, f, indent=2, default=str)
+
+    # 7b. quality_report.json — dedicated quality-assessment report (spec-named
+    # output file). cleaning_report.json above is the full superset; this is
+    # just the quality_assessment section plus the duplicate-rate guardrail
+    # stats, for anyone consuming ONLY the quality signal.
+    quality_report = {
+        "run_timestamp":    report.get("run_timestamp"),
+        "rows_scored":      report.get("quality_assessment", {}).get("rows_scored"),
+        "avg_quality_score": report.get("quality_assessment", {}).get("avg_quality_score"),
+        "band_counts":      report.get("quality_assessment", {}).get("band_counts"),
+        "exact_duplicate_rate":     report.get("deduplication", {}).get("exact_duplicate_rate"),
+        "possible_duplicate_rate":  report.get("deduplication", {}).get("possible_duplicate_rate"),
+        "high_duplicate_rate_warning": report.get("deduplication", {}).get("high_duplicate_rate_warning"),
+        "high_duplicate_rate_warning_message": report.get("deduplication", {}).get("high_duplicate_rate_warning_message"),
+    }
+    with open(os.path.join(out_dir, "quality_report.json"), "w") as f:
+        json.dump(quality_report, f, indent=2, default=str)
 
     # 8. cleaning_summary.txt — human-readable narrative
     _write_summary_txt(report, balance_report, len(removed_df),
@@ -453,15 +499,27 @@ def _write_summary_txt(report, balance_report, n_removed, n_flagged,
         "",
         "MODULE 2 — DUPLICATE DETECTOR",
         "-" * 40,
-        f"  Exact duplicates removed : {report['deduplication']['exact_duplicates_found']}",
+        f"  Exact duplicates removed : {report['deduplication']['exact_duplicates_found']} "
+        f"({report['deduplication'].get('exact_duplicate_rate', 0):.1%} of input rows; target <3%)",
+        f"  → Requires: account+date+narration+debit+credit+balance+UTR (if present) all match",
         f"  → Cause: same statement uploaded twice, or a parser/OCR artifact",
         f"    re-emitting the same line back-to-back in one file",
         f"  → Action: duplicate removed; first occurrence kept",
         f"  Near duplicates flagged  : {report['deduplication']['near_duplicates_flagged']}",
-        f"  → Cause: same account/date/amounts, narration differs",
-        f"  → Action: flagged is_duplicate=True; human review required",
+        f"  → Cause: same account/date/amounts + narration similarity >=95%",
+        f"  → Action: flagged is_duplicate=True + POSSIBLE_DUPLICATE; human review required, never removed",
         f"  UTR collisions flagged   : {report['deduplication']['utr_collisions_flagged']}",
         f"  → Cause: same reference number on rows that aren't a matching transfer pair",
+        f"  Possible duplicates (near + UTR + multi-file), combined: "
+        f"{report['deduplication'].get('possible_duplicate_rate', 0):.1%} of input rows (target 5-15%)",
+    ]
+    if report["deduplication"].get("high_duplicate_rate_warning"):
+        lines += [
+            "",
+            f"  ⚠️  HIGH_DUPLICATE_RATE_WARNING",
+            f"     {report['deduplication'].get('high_duplicate_rate_warning_message', '')}",
+        ]
+    lines += [
         "",
         "MODULE 3 — DATA VALIDATOR",
         "-" * 40,
@@ -469,14 +527,23 @@ def _write_summary_txt(report, balance_report, n_removed, n_flagged,
         f"{report['transaction_type_validation']['invalid_transaction_rows']}",
         f"  Both-negative amount rows                      : "
         f"{report['transaction_type_validation']['both_negative_rows']}",
+        f"  Failed/declined/reversed/etc. transactions (flagged, never removed): "
+        f"{report['failed_transaction_detection']['failed_transaction_rows']}",
+    ]
+    kw_counts = report["failed_transaction_detection"].get("failed_transaction_keyword_counts", {})
+    for kw, cnt in kw_counts.items():
+        lines.append(f"     • {kw}: {cnt}")
+    lines += [
         f"  Accounts checked (balance)      : {report['balance_validation']['accounts_checked']}",
-        f"  Accounts with breaches          : {report['balance_validation']['accounts_with_breaches']}",
-        f"  Breach rows total                : {report['balance_validation']['total_breach_rows']}",
+        f"  Accounts with mismatches        : {report['balance_validation']['accounts_with_breaches']}",
+        f"  Mismatch rows total             : {report['balance_validation']['total_breach_rows']}",
+        f"    BALANCE_MISMATCH_MINOR (<=₹5) : {report['balance_validation']['total_minor_mismatch_rows']}",
+        f"    BALANCE_MISMATCH_MAJOR (>₹5)  : {report['balance_validation']['total_major_mismatch_rows']}",
         f"  → Formula: prev_balance + credit - debit ≈ current_balance",
-        f"  → Tolerance: ₹1 (bank rounding)",
+        f"  → Rows are never removed for balance mismatches, only flagged",
         f"  Accounts w/ untracked balance    : {report['balance_validation']['n_balance_untracked_accounts']}",
         f"  → Balance column never moves despite real transactions on these accounts;",
-        f"    excluded from per-row BALANCE_BREACH scoring, see balance_untracked_accounts.csv",
+        f"    excluded from per-row scoring, see balance_untracked_accounts.csv",
         f"  Self-transfers flagged          : {report['counterparty_validation']['self_transfers_flagged']}",
         f"  Malformed IFSC flagged          : {report['counterparty_validation']['malformed_ifsc_flagged']}",
         f"  Outlier rows flagged            : {report['outlier_flagging']['outlier_rows_flagged']}",
@@ -506,8 +573,9 @@ def _write_summary_txt(report, balance_report, n_removed, n_flagged,
         "-" * 40,
         f"  Missing account_id (flagged, not imputed) : {mv['missing_account_id']}",
         f"  Missing date (flagged, not imputed)       : {mv['missing_date']}",
-        f"  Narration filled with placeholder         : {mv['missing_narration_filled']}",
-        f"  Debit/credit filled with 0.0               : {mv['missing_amount_filled']}",
+        f"  Narration filled with NULL (flagged)       : {mv['missing_narration_filled']}",
+        f"  Debit/credit filled with 0.0 (opposite side present): {mv['missing_amount_filled']}",
+        f"  Both debit AND credit missing (flagged, NOT filled) : {mv['both_amounts_missing']}",
         f"  Missing balance (flagged, not imputed)    : {mv['missing_balance']}",
         f"  Missing UTR (informational)               : {mv['missing_utr']}",
         f"  Time defaulted to 00:00:00                : {mv['missing_time_defaulted']}",
@@ -545,6 +613,7 @@ def _write_summary_txt(report, balance_report, n_removed, n_flagged,
         "  suspect_accounts.csv          ← Balance integrity failures",
         "  balance_untracked_accounts.csv ← Accounts whose balance column never moves",
         "  cleaning_report.json          ← Machine-readable full report",
+        "  quality_report.json           ← Quality-assessment + duplicate-rate stats only",
         "  cleaning_summary.txt          ← This file",
         "=" * 70,
     ]
@@ -567,11 +636,19 @@ def _print_summary(report, out_dir):
     print(f"{'='*62}")
     print(f"  Rows input              : {report['rows_input']:,}")
     print(f"  Rows output             : {report['rows_output']:,}")
-    print(f"  Exact dupes removed     : {report['deduplication']['exact_duplicates_found']}")
-    print(f"  Near dupes flagged      : {report['deduplication']['near_duplicates_flagged']}")
-    print(f"  UTR collisions flagged  : {report['deduplication']['utr_collisions_flagged']}")
+    dedup = report['deduplication']
+    print(f"  Exact dupes removed     : {dedup['exact_duplicates_found']} "
+          f"({dedup.get('exact_duplicate_rate', 0):.1%}, target <3%)")
+    print(f"  Near dupes flagged      : {dedup['near_duplicates_flagged']}")
+    print(f"  UTR collisions flagged  : {dedup['utr_collisions_flagged']}")
+    print(f"  Possible dupes (total)  : {dedup.get('possible_duplicate_rate', 0):.1%} (target 5-15%)")
+    if dedup.get("high_duplicate_rate_warning"):
+        print(f"  ⚠️  HIGH_DUPLICATE_RATE_WARNING — see cleaning_summary.txt")
     print(f"  Invalid transactions    : {report['transaction_type_validation']['invalid_transaction_rows']}")
-    print(f"  Balance breach rows     : {report['balance_validation']['total_breach_rows']}")
+    print(f"  Failed transactions     : {report['failed_transaction_detection']['failed_transaction_rows']} (flagged, never removed)")
+    print(f"  Balance mismatch rows   : {report['balance_validation']['total_breach_rows']} "
+          f"(minor: {report['balance_validation']['total_minor_mismatch_rows']}, "
+          f"major: {report['balance_validation']['total_major_mismatch_rows']})")
     print(f"  Suspect accounts        : {report['balance_validation']['n_suspect_accounts']}")
     print(f"  High-value outlier rows : {report['outlier_flagging']['outlier_rows_flagged']}")
     print(f"  Velocity burst rows     : {report['velocity_flagging']['velocity_rows_flagged']}")
@@ -585,6 +662,7 @@ def _print_summary(report, out_dir):
     print(f"    • all_actions.csv              ← every change made, row by row")
     print(f"    • suspect_accounts.csv         ← balance integrity failures")
     print(f"    • cleaning_report.json         ← machine-readable audit trail")
+    print(f"    • quality_report.json          ← quality-assessment + duplicate-rate stats")
     print(f"    • cleaning_summary.txt         ← human-readable narrative")
     print(f"{'='*62}\n")
 

@@ -30,7 +30,8 @@ from cleaning_config import (
     DATE_VALID_YEAR_MIN, DATE_VALID_YEAR_MAX,
     AMOUNT_BRACKET_NEGATIVE, AMOUNT_STRIP_CURRENCY, AMOUNT_HANDLE_CR_DR,
     AMOUNT_HANDLE_LAKH_WORDS, CURRENCY_SYMBOLS, LAKH_CRORE_MULTIPLIERS,
-    BALANCE_TOLERANCE, BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD,
+    BALANCE_TOLERANCE, BALANCE_MISMATCH_MINOR_MAX,
+    BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD,
     BALANCE_FLATLINE_RATIO_THRESHOLD, BALANCE_FLATLINE_MIN_TXNS,
     OUTLIER_IQR_MULTIPLIER, OUTLIER_MIN_TXN_COUNT,
     VELOCITY_WINDOW_MINUTES, VELOCITY_MIN_TXNS, VELOCITY_MIN_AMOUNT,
@@ -38,6 +39,7 @@ from cleaning_config import (
     NARRATION_STRIP_CHARS, NARRATION_SEPARATOR_CHARS, NARRATION_MIN_LEN_FLAG,
     CHANNEL_NORMALISE, ACCOUNT_ID_STRIP_SPACES,
     FLAG_BOTH_DEBIT_AND_CREDIT, FLAG_BOTH_NEGATIVE,
+    FLAG_FAILED_TRANSACTIONS, FAILED_TXN_KEYWORDS,
 )
 
 
@@ -304,18 +306,77 @@ def validate_transaction_types(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, li
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 4 — Balance Continuity  (unchanged logic, richer per-account stats)
+# Pass 3b — Failed-Transaction Detection  (new — revised-spec compliance)
+# ─────────────────────────────────────────────────────────────────────────────
+def flag_failed_transactions(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
+    """
+    A transaction that failed/was declined/timed out/was reversed/cancelled/
+    rolled back is still real forensic evidence (an attempted movement of
+    money) — it is FLAGGED ONLY, never deleted. Matched as a whole word
+    against narration, channel, and a "status" column if the source
+    provided one. Run after Pass 1c narration normalisation so this sees
+    the already-uppercased, noise-stripped narration text.
+    """
+    report  = {"failed_transaction_rows": 0, "failed_transaction_keyword_counts": {}}
+    actions = []
+    df = df.copy()
+    df["is_failed_transaction"] = False
+
+    if not FLAG_FAILED_TRANSACTIONS:
+        return df, report, actions
+
+    fields = [c for c in ("narration", "channel", "status") if c in df.columns]
+    if not fields:
+        return df, report, actions
+
+    combined = pd.Series([""] * len(df), index=df.index)
+    for f in fields:
+        combined = combined + " " + df[f].fillna("").astype(str).str.upper()
+
+    patterns = {kw: re.compile(rf"\b{re.escape(kw)}\b") for kw in FAILED_TXN_KEYWORDS}
+
+    matched_any = pd.Series(False, index=df.index)
+    for kw, pattern in patterns.items():
+        kw_mask = combined.str.contains(pattern)
+        if kw_mask.any():
+            report["failed_transaction_keyword_counts"][kw] = int(kw_mask.sum())
+            matched_any = matched_any | kw_mask
+            for idx in df.index[kw_mask]:
+                df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], f"FAILED_TRANSACTION_{kw}")
+                actions.append(_action(df, idx, f"FAILED_TRANSACTION_{kw}",
+                    f"'{kw}' found in narration/channel/status — transaction did not settle; "
+                    f"kept and flagged, not removed"))
+
+    df.loc[matched_any, "is_failed_transaction"] = True
+    report["failed_transaction_rows"] = int(matched_any.sum())
+
+    return df, report, actions
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 4 — Balance Continuity  (revised-spec: MINOR/MAJOR mismatch, never removes)
 # ─────────────────────────────────────────────────────────────────────────────
 def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     """
     Forensic tamper-detection: prior_balance + credit - debit ≈ current_balance.
     A statement that doesn't reconcile is either OCR-corrupted or tampered.
-    Both need investigator attention.
+    Both need investigator attention. Rows are NEVER removed for this —
+    per the revised spec, a reconciliation gap is bucketed into exactly two
+    severities:
+        diff <= BALANCE_MISMATCH_MINOR_MAX (₹5) → BALANCE_MISMATCH_MINOR
+        diff >  BALANCE_MISMATCH_MINOR_MAX (₹5) → BALANCE_MISMATCH_MAJOR
+    `is_balance_breach` is kept as a convenience OR of the two (minor |
+    major) so existing "any flag" aggregation logic elsewhere doesn't need
+    to know about the split; account-level suspect-account escalation
+    (breach_ratio) is based on MAJOR mismatches only, since minor
+    reconciliation gaps are common banking rounding noise, not tamper signal.
     """
     report = {
         "accounts_checked":       0,
         "accounts_with_breaches": 0,
         "total_breach_rows":      0,
+        "total_minor_mismatch_rows": 0,
+        "total_major_mismatch_rows": 0,
         "max_single_breach_amt":  0.0,
         "balance_review_accounts":       [],
         "accounts_balance_untracked":    0,
@@ -324,6 +385,8 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
     actions = []
     df = df.copy()
     df["is_balance_breach"] = False
+    df["is_balance_mismatch_minor"] = False
+    df["is_balance_mismatch_major"] = False
     has_missing_balance_col = "_missing_balance" in df.columns
 
     for account_id, group in df.groupby("account_id"):
@@ -384,7 +447,8 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
                 f"per-row BALANCE_BREACH detection to avoid noise"))
             continue  # skip per-row breach detection for this account entirely
 
-        breach_indices = []
+        minor_indices = []
+        major_indices = []
         max_diff_this_account = 0.0
 
         for i in range(1, len(valid)):
@@ -415,31 +479,62 @@ def validate_balance_continuity(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, l
             actual   = round(curr_bal, 2)
             diff     = abs(expected - actual)
 
-            if diff > BALANCE_TOLERANCE:
-                idx = curr_row.name
-                breach_indices.append(idx)
-                max_diff_this_account = max(max_diff_this_account, diff)
-                actions.append(_action(df, idx, "BALANCE_BREACH",
-                    f"Expected balance {expected} but got {actual} "
-                    f"(diff ₹{diff:.2f}) — possible tamper or OCR error"))
+            # BALANCE_TOLERANCE here is only a float-rounding epsilon, not
+            # a "no flag" zone — per the revised spec, ANY reconciliation
+            # gap is flagged, just bucketed by severity.
+            if diff <= BALANCE_TOLERANCE:
+                continue
 
+            idx = curr_row.name
+            max_diff_this_account = max(max_diff_this_account, diff)
+
+            if diff <= BALANCE_MISMATCH_MINOR_MAX:
+                minor_indices.append(idx)
+                actions.append(_action(df, idx, "BALANCE_MISMATCH_MINOR",
+                    f"Expected balance {expected} but got {actual} "
+                    f"(diff ₹{diff:.2f}, <= ₹{BALANCE_MISMATCH_MINOR_MAX:.0f}) — minor reconciliation gap"))
+            else:
+                major_indices.append(idx)
+                actions.append(_action(df, idx, "BALANCE_MISMATCH_MAJOR",
+                    f"Expected balance {expected} but got {actual} "
+                    f"(diff ₹{diff:.2f}, > ₹{BALANCE_MISMATCH_MINOR_MAX:.0f}) — possible tamper or OCR error"))
+
+        if minor_indices:
+            df.loc[minor_indices, "is_balance_mismatch_minor"] = True
+            df.loc[minor_indices, "is_balance_breach"] = True
+            df.loc[minor_indices, "clean_flags"] = df.loc[minor_indices, "clean_flags"].apply(
+                lambda f: _add(f, "BALANCE_MISMATCH_MINOR")
+            )
+            report["total_minor_mismatch_rows"] += len(minor_indices)
+
+        if major_indices:
+            df.loc[major_indices, "is_balance_mismatch_major"] = True
+            df.loc[major_indices, "is_balance_breach"] = True
+            df.loc[major_indices, "clean_flags"] = df.loc[major_indices, "clean_flags"].apply(
+                lambda f: _add(f, "BALANCE_MISMATCH_MAJOR")
+            )
+            report["total_major_mismatch_rows"] += len(major_indices)
+
+        breach_indices = minor_indices + major_indices
         if breach_indices:
             breach_ratio = len(breach_indices) / len(valid)
-            df.loc[breach_indices, "is_balance_breach"] = True
+            major_ratio  = len(major_indices) / len(valid)
             report["total_breach_rows"]      += len(breach_indices)
             report["accounts_with_breaches"] += 1
             report["max_single_breach_amt"]   = max(
                 report["max_single_breach_amt"], max_diff_this_account
             )
 
-            if breach_ratio > BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD:
+            # Account-level escalation is based on MAJOR mismatches only —
+            # minor (<=₹5) gaps are common rounding noise, not tamper signal.
+            if major_ratio > BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD:
                 report["balance_review_accounts"].append({
                     "account_id":   account_id,
-                    "breach_ratio": round(breach_ratio, 3),
-                    "breach_rows":  len(breach_indices),
+                    "breach_ratio": round(major_ratio, 3),
+                    "breach_rows":  len(major_indices),
                     "total_rows":   len(valid),
                     "max_breach_amount": round(max_diff_this_account, 2),
-                    "severity":     "HIGH" if breach_ratio > 0.5 else "MEDIUM",
+                    "severity":     "HIGH" if major_ratio > 0.5 else "MEDIUM",
                 })
 
     return df, report, actions
