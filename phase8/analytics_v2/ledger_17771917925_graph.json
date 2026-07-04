@@ -1,0 +1,3696 @@
+{
+  "nodes": [
+    {
+      "data": {
+        "id": "17771917925",
+        "label": NaN,
+        "bank": "IDFC FIRST Bank",
+        "risk_score": 26.3,
+        "risk_tier": "MEDIUM",
+        "role": "mule",
+        "is_seed": true,
+        "is_internal": true
+      }
+    },
+    {
+      "data": {
+        "id": "Chq Dep",
+        "label": "Chq Dep",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Alteration Require Drawe",
+        "label": "Alteration Require Drawe",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "UNKNOWN",
+        "label": "UNKNOWN",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "merchant",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Meera Gupt",
+        "label": "Meera Gupt",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Hdfc Life",
+        "label": "Hdfc Life",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "104755660776",
+        "label": "104755660776",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513386575356",
+        "label": "513386575356",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "549968600745",
+        "label": "549968600745",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513321023545",
+        "label": "513321023545",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513460658719",
+        "label": "513460658719",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513412693662",
+        "label": "513412693662",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513508415750",
+        "label": "513508415750",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2120020000 0327",
+        "label": "2120020000 0327",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513510723500",
+        "label": "513510723500",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Debasi S Mishra Bangalore",
+        "label": "Debasi S Mishra Bangalore",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2120020000 0329",
+        "label": "2120020000 0329",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2913020000 1026",
+        "label": "2913020000 1026",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2618020000 1952",
+        "label": "2618020000 1952",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2120020000 0323",
+        "label": "2120020000 0323",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009267 9780",
+        "label": "2020009267 9780",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "0323044440 000482",
+        "label": "0323044440 000482",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "44010519164",
+        "label": "44010519164",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "104842949440",
+        "label": "104842949440",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "550104221120",
+        "label": "550104221120",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009178 0397",
+        "label": "2020009178 0397",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009589 9592",
+        "label": "2020009589 9592",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "5010066020 5072",
+        "label": "5010066020 5072",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "614087659848",
+        "label": "614087659848",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "550180176641",
+        "label": "550180176641",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "550153775982",
+        "label": "550153775982",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "550170682885",
+        "label": "550170682885",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "383909016472",
+        "label": "383909016472",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "10051960193",
+        "label": "10051960193",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009260 3478",
+        "label": "2020009260 3478",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009255 5570",
+        "label": "2020009255 5570",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "8015778588",
+        "label": "8015778588",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "7994168213",
+        "label": "7994168213",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "4285406733 6",
+        "label": "4285406733 6",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "5741050984",
+        "label": "5741050984",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "5741050441",
+        "label": "5741050441",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "8019782681",
+        "label": "8019782681",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "3863720276",
+        "label": "3863720276",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "88941821002 8403",
+        "label": "88941821002 8403",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "50100798911 068",
+        "label": "50100798911 068",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Rushi Janakray Bhatt A 107 Prithome",
+        "label": "Rushi Janakray Bhatt A 107 Prithome",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009286 6111",
+        "label": "2020009286 6111",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513514996442",
+        "label": "513514996442",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513515894338",
+        "label": "513515894338",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513608453188",
+        "label": "513608453188",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "717652110897",
+        "label": "717652110897",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "579389668191",
+        "label": "579389668191",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "582255443638",
+        "label": "582255443638",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Mr Pankaj",
+        "label": "Mr Pankaj",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513609329297",
+        "label": "513609329297",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513610589560",
+        "label": "513610589560",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "A D Construction",
+        "label": "A D Construction",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513610618924",
+        "label": "513610618924",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Ravi Narayan Patgar Chqno 353566",
+        "label": "Ravi Narayan Patgar Chqno 353566",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513610628716",
+        "label": "513610628716",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513695432396",
+        "label": "513695432396",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513651421795",
+        "label": "513651421795",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513628717331",
+        "label": "513628717331",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "452226791401",
+        "label": "452226791401",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513611683646",
+        "label": "513611683646",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "9240200372 47952",
+        "label": "9240200372 47952",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Vaisha",
+        "label": "Vaisha",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "G Rajendran No31 G R G Chan",
+        "label": "G Rajendran No31 G R G Chan",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513612803077",
+        "label": "513612803077",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009260 8201",
+        "label": "2020009260 8201",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009169 2682",
+        "label": "2020009169 2682",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "120825526729",
+        "label": "120825526729",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513612530670",
+        "label": "513612530670",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "10715852531",
+        "label": "10715852531",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Nitin",
+        "label": "Nitin",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513612891586",
+        "label": "513612891586",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513614065421",
+        "label": "513614065421",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513635451356",
+        "label": "513635451356",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513614892360",
+        "label": "513614892360",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513616356716",
+        "label": "513616356716",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513617493733",
+        "label": "513617493733",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "561400977207",
+        "label": "561400977207",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513617560486",
+        "label": "513617560486",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513619756765",
+        "label": "513619756765",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513619681256",
+        "label": "513619681256",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "10183534063",
+        "label": "10183534063",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "3560011000 4524",
+        "label": "3560011000 4524",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "207541454681",
+        "label": "207541454681",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513747858679",
+        "label": "513747858679",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Suresh P Block1,G",
+        "label": "Suresh P Block1,G",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009657 5603",
+        "label": "2020009657 5603",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2120020000 0328",
+        "label": "2120020000 0328",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009596 2335",
+        "label": "2020009596 2335",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "0323044440 000480",
+        "label": "0323044440 000480",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513785838296",
+        "label": "513785838296",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "7400020100 01468",
+        "label": "7400020100 01468",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "104945588788",
+        "label": "104945588788",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513710780575",
+        "label": "513710780575",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "9760000100 009507",
+        "label": "9760000100 009507",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "38535772819",
+        "label": "38535772819",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "6248076479 4",
+        "label": "6248076479 4",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513712155707",
+        "label": "513712155707",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "4047526881",
+        "label": "4047526881",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "1613219599",
+        "label": "1613219599",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513712839479",
+        "label": "513712839479",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "104953086654",
+        "label": "104953086654",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "1340155000 032361",
+        "label": "1340155000 032361",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "399504713921",
+        "label": "399504713921",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513714012787",
+        "label": "513714012787",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513714901929",
+        "label": "513714901929",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "5010052480 6733",
+        "label": "5010052480 6733",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513730214070",
+        "label": "513730214070",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "00641010013 4067",
+        "label": "00641010013 4067",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "614180448991",
+        "label": "614180448991",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513716317097",
+        "label": "513716317097",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513809435630",
+        "label": "513809435630",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "2020009602 2762",
+        "label": "2020009602 2762",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513719586628",
+        "label": "513719586628",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513810471617",
+        "label": "513810471617",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513810657086",
+        "label": "513810657086",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513810490894",
+        "label": "513810490894",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513810748528",
+        "label": "513810748528",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513810754532",
+        "label": "513810754532",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513811519624",
+        "label": "513811519624",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513810320861",
+        "label": "513810320861",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513811562841",
+        "label": "513811562841",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513811782852",
+        "label": "513811782852",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812601930",
+        "label": "513812601930",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Dr Ramakrishnan K S Lecturer Flat N",
+        "label": "Dr Ramakrishnan K S Lecturer Flat N",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812604662",
+        "label": "513812604662",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812658300",
+        "label": "513812658300",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812446295",
+        "label": "513812446295",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812662016",
+        "label": "513812662016",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812684174",
+        "label": "513812684174",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513812476695",
+        "label": "513812476695",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "9240100538 55907",
+        "label": "9240100538 55907",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "33952010019 682",
+        "label": "33952010019 682",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513813562141",
+        "label": "513813562141",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "6195020100 09758",
+        "label": "6195020100 09758",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513814724665",
+        "label": "513814724665",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513815872839",
+        "label": "513815872839",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "20235180292",
+        "label": "20235180292",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "191101100635 69",
+        "label": "191101100635 69",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513815208590",
+        "label": "513815208590",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513816898208",
+        "label": "513816898208",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513816956281",
+        "label": "513816956281",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513816901261",
+        "label": "513816901261",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513818095533",
+        "label": "513818095533",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Neha",
+        "label": "Neha",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513908730836",
+        "label": "513908730836",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513909506781",
+        "label": "513909506781",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "513910665201",
+        "label": "513910665201",
+        "bank": "UNKNOWN",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "victim",
+        "is_seed": false,
+        "is_internal": false
+      }
+    },
+    {
+      "data": {
+        "id": "Pradee P Srivastava Mumbai",
+        "label": "Pradee P Srivastava Mumbai",
+        "bank": "UNKNOWN Bank",
+        "risk_score": 0.0,
+        "risk_tier": "LOW",
+        "role": "unknown",
+        "is_seed": false,
+        "is_internal": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "data": {
+        "id": "e_17771917925_0",
+        "source": "Chq Dep",
+        "target": "17771917925",
+        "amount": 100000.0,
+        "dates": [
+          "2025-05-09"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_1",
+        "source": "17771917925",
+        "target": "Alteration Require Drawe",
+        "amount": 100000.0,
+        "dates": [
+          "2025-05-09"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_2",
+        "source": "UNKNOWN",
+        "target": "17771917925",
+        "amount": 98522.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_3",
+        "source": "17771917925",
+        "target": "Meera Gupt",
+        "amount": 98400.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_4",
+        "source": "17771917925",
+        "target": "UNKNOWN",
+        "amount": 70833.13,
+        "dates": [
+          "2025-05-13",
+          "2025-06-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_5",
+        "source": "17771917925",
+        "target": "Hdfc Life",
+        "amount": 104500.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_6",
+        "source": "104755660776",
+        "target": "17771917925",
+        "amount": 98400.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_7",
+        "source": "513386575356",
+        "target": "17771917925",
+        "amount": 2000.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_8",
+        "source": "549968600745",
+        "target": "17771917925",
+        "amount": 5000.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_9",
+        "source": "17771917925",
+        "target": "513321023545",
+        "amount": 1000.0,
+        "dates": [
+          "2025-05-13"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_10",
+        "source": "513460658719",
+        "target": "17771917925",
+        "amount": 200.0,
+        "dates": [
+          "2025-05-14",
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_11",
+        "source": "17771917925",
+        "target": "513412693662",
+        "amount": 3.0,
+        "dates": [
+          "2025-05-14"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_12",
+        "source": "17771917925",
+        "target": "513508415750",
+        "amount": 2.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_13",
+        "source": "17771917925",
+        "target": "2120020000 0327",
+        "amount": 400500.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_14",
+        "source": "513510723500",
+        "target": "17771917925",
+        "amount": 5000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_15",
+        "source": "Debasi S Mishra Bangalore",
+        "target": "17771917925",
+        "amount": 2860308.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_16",
+        "source": "17771917925",
+        "target": "2120020000 0329",
+        "amount": 200500.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_17",
+        "source": "17771917925",
+        "target": "2913020000 1026",
+        "amount": 200500.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_18",
+        "source": "17771917925",
+        "target": "2618020000 1952",
+        "amount": 400500.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_19",
+        "source": "17771917925",
+        "target": "2120020000 0323",
+        "amount": 201000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_20",
+        "source": "17771917925",
+        "target": "2020009267 9780",
+        "amount": 550000.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-19"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_21",
+        "source": "17771917925",
+        "target": "0323044440 000482",
+        "amount": 756381.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_22",
+        "source": "17771917925",
+        "target": "44010519164",
+        "amount": 40003.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_23",
+        "source": "104842949440",
+        "target": "17771917925",
+        "amount": 36151.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_24",
+        "source": "550104221120",
+        "target": "17771917925",
+        "amount": 95000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_25",
+        "source": "17771917925",
+        "target": "2020009178 0397",
+        "amount": 600000.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_26",
+        "source": "17771917925",
+        "target": "2020009589 9592",
+        "amount": 1040000.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_27",
+        "source": "17771917925",
+        "target": "5010066020 5072",
+        "amount": 46900.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_28",
+        "source": "614087659848",
+        "target": "17771917925",
+        "amount": 33300.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_29",
+        "source": "550180176641",
+        "target": "17771917925",
+        "amount": 1.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_30",
+        "source": "550153775982",
+        "target": "17771917925",
+        "amount": 15000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_31",
+        "source": "550170682885",
+        "target": "17771917925",
+        "amount": 15000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_32",
+        "source": "383909016472",
+        "target": "17771917925",
+        "amount": 5000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_33",
+        "source": "10051960193",
+        "target": "17771917925",
+        "amount": 2760000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_34",
+        "source": "17771917925",
+        "target": "2020009260 3478",
+        "amount": 250470.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_35",
+        "source": "17771917925",
+        "target": "2020009255 5570",
+        "amount": 240734.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_36",
+        "source": "17771917925",
+        "target": "8015778588",
+        "amount": 100188.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_37",
+        "source": "17771917925",
+        "target": "7994168213",
+        "amount": 200376.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_38",
+        "source": "17771917925",
+        "target": "4285406733 6",
+        "amount": 140382.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_39",
+        "source": "17771917925",
+        "target": "5741050984",
+        "amount": 100188.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_40",
+        "source": "17771917925",
+        "target": "5741050441",
+        "amount": 100188.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_41",
+        "source": "17771917925",
+        "target": "8019782681",
+        "amount": 490000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_42",
+        "source": "17771917925",
+        "target": "3863720276",
+        "amount": 1000090.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_43",
+        "source": "17771917925",
+        "target": "88941821002 8403",
+        "amount": 205150.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_44",
+        "source": "17771917925",
+        "target": "50100798911 068",
+        "amount": 1390000.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_45",
+        "source": "Rushi Janakray Bhatt A 107 Prithome",
+        "target": "17771917925",
+        "amount": 334724.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_46",
+        "source": "17771917925",
+        "target": "2020009286 6111",
+        "amount": 100000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_47",
+        "source": "513514996442",
+        "target": "17771917925",
+        "amount": 100000.0,
+        "dates": [
+          "2025-05-15"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_48",
+        "source": "513515894338",
+        "target": "17771917925",
+        "amount": 495000.0,
+        "dates": [
+          "2025-05-15",
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_49",
+        "source": "17771917925",
+        "target": "513608453188",
+        "amount": 2.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_50",
+        "source": "717652110897",
+        "target": "17771917925",
+        "amount": 5000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_51",
+        "source": "579389668191",
+        "target": "17771917925",
+        "amount": 55000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_52",
+        "source": "582255443638",
+        "target": "17771917925",
+        "amount": 12000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_53",
+        "source": "Mr Pankaj",
+        "target": "17771917925",
+        "amount": 11305.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_54",
+        "source": "513609329297",
+        "target": "17771917925",
+        "amount": 90000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_55",
+        "source": "17771917925",
+        "target": "513610589560",
+        "amount": 88282.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_56",
+        "source": "A D Construction",
+        "target": "17771917925",
+        "amount": 86000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_57",
+        "source": "17771917925",
+        "target": "513610618924",
+        "amount": 62000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_58",
+        "source": "Ravi Narayan Patgar Chqno 353566",
+        "target": "17771917925",
+        "amount": 211000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_59",
+        "source": "17771917925",
+        "target": "513610628716",
+        "amount": 170000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_60",
+        "source": "513695432396",
+        "target": "17771917925",
+        "amount": 1.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_61",
+        "source": "513651421795",
+        "target": "17771917925",
+        "amount": 10000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_62",
+        "source": "513628717331",
+        "target": "17771917925",
+        "amount": 10000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_63",
+        "source": "452226791401",
+        "target": "17771917925",
+        "amount": 1000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_64",
+        "source": "17771917925",
+        "target": "513611683646",
+        "amount": 2.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_65",
+        "source": "17771917925",
+        "target": "9240200372 47952",
+        "amount": 1000000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_66",
+        "source": "Vaisha",
+        "target": "17771917925",
+        "amount": 60000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_67",
+        "source": "G Rajendran No31 G R G Chan",
+        "target": "17771917925",
+        "amount": 2000000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_68",
+        "source": "17771917925",
+        "target": "513612803077",
+        "amount": 130000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_69",
+        "source": "17771917925",
+        "target": "2020009260 8201",
+        "amount": 300000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_70",
+        "source": "17771917925",
+        "target": "2020009169 2682",
+        "amount": 110525.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_71",
+        "source": "120825526729",
+        "target": "17771917925",
+        "amount": 10000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_72",
+        "source": "513612530670",
+        "target": "17771917925",
+        "amount": 500000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_73",
+        "source": "17771917925",
+        "target": "10715852531",
+        "amount": 40000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_74",
+        "source": "Nitin",
+        "target": "17771917925",
+        "amount": 303000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_75",
+        "source": "17771917925",
+        "target": "513612891586",
+        "amount": 114053.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_76",
+        "source": "17771917925",
+        "target": "513614065421",
+        "amount": 86000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_77",
+        "source": "513635451356",
+        "target": "17771917925",
+        "amount": 59000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_78",
+        "source": "513614892360",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_79",
+        "source": "17771917925",
+        "target": "513616356716",
+        "amount": 1188.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_80",
+        "source": "17771917925",
+        "target": "513617493733",
+        "amount": 24300.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_81",
+        "source": "561400977207",
+        "target": "17771917925",
+        "amount": 5000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_82",
+        "source": "17771917925",
+        "target": "513617560486",
+        "amount": 3.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_83",
+        "source": "17771917925",
+        "target": "513619756765",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-16"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_84",
+        "source": "513619681256",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-16",
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_85",
+        "source": "17771917925",
+        "target": "10183534063",
+        "amount": 6.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_86",
+        "source": "17771917925",
+        "target": "3560011000 4524",
+        "amount": 75000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_87",
+        "source": "207541454681",
+        "target": "17771917925",
+        "amount": 5000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_88",
+        "source": "513747858679",
+        "target": "17771917925",
+        "amount": 69326.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_89",
+        "source": "Suresh P Block1,G",
+        "target": "17771917925",
+        "amount": 1235000.0,
+        "dates": [
+          "2025-05-17",
+          "2025-05-18"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_90",
+        "source": "17771917925",
+        "target": "2020009657 5603",
+        "amount": 190500.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_91",
+        "source": "17771917925",
+        "target": "2120020000 0328",
+        "amount": 601000.0,
+        "dates": [
+          "2025-05-17",
+          "2025-05-18",
+          "2025-05-19"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_92",
+        "source": "17771917925",
+        "target": "2020009596 2335",
+        "amount": 190500.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_93",
+        "source": "17771917925",
+        "target": "0323044440 000480",
+        "amount": 200018.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_94",
+        "source": "513785838296",
+        "target": "17771917925",
+        "amount": 100000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_95",
+        "source": "17771917925",
+        "target": "7400020100 01468",
+        "amount": 40000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_96",
+        "source": "104945588788",
+        "target": "17771917925",
+        "amount": 35000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_97",
+        "source": "513710780575",
+        "target": "17771917925",
+        "amount": 42163.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_98",
+        "source": "17771917925",
+        "target": "9760000100 009507",
+        "amount": 24159.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_99",
+        "source": "17771917925",
+        "target": "38535772819",
+        "amount": 13000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_100",
+        "source": "17771917925",
+        "target": "6248076479 4",
+        "amount": 10088.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_101",
+        "source": "513712155707",
+        "target": "17771917925",
+        "amount": 20000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_102",
+        "source": "17771917925",
+        "target": "4047526881",
+        "amount": 10108.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_103",
+        "source": "17771917925",
+        "target": "1613219599",
+        "amount": 11342.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_104",
+        "source": "513712839479",
+        "target": "17771917925",
+        "amount": 15000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_105",
+        "source": "104953086654",
+        "target": "17771917925",
+        "amount": 83859.13,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_106",
+        "source": "17771917925",
+        "target": "1340155000 032361",
+        "amount": 16000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_107",
+        "source": "399504713921",
+        "target": "17771917925",
+        "amount": 10000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_108",
+        "source": "17771917925",
+        "target": "513714012787",
+        "amount": 39993.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_109",
+        "source": "513714901929",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_110",
+        "source": "17771917925",
+        "target": "5010052480 6733",
+        "amount": 50459.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_111",
+        "source": "513730214070",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_112",
+        "source": "17771917925",
+        "target": "00641010013 4067",
+        "amount": 18000.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_113",
+        "source": "614180448991",
+        "target": "17771917925",
+        "amount": 95000.0,
+        "dates": [
+          "2025-05-17",
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_114",
+        "source": "17771917925",
+        "target": "513716317097",
+        "amount": 87310.0,
+        "dates": [
+          "2025-05-17"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_115",
+        "source": "17771917925",
+        "target": "513809435630",
+        "amount": 7.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_116",
+        "source": "17771917925",
+        "target": "2020009602 2762",
+        "amount": 220147.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_117",
+        "source": "513719586628",
+        "target": "17771917925",
+        "amount": 1.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_118",
+        "source": "17771917925",
+        "target": "513810471617",
+        "amount": 165500.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_119",
+        "source": "513810657086",
+        "target": "17771917925",
+        "amount": 150000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_120",
+        "source": "17771917925",
+        "target": "513810490894",
+        "amount": 25000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_121",
+        "source": "513810748528",
+        "target": "17771917925",
+        "amount": 17500.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_122",
+        "source": "513810754532",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_123",
+        "source": "17771917925",
+        "target": "513811519624",
+        "amount": 82500.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_124",
+        "source": "513810320861",
+        "target": "17771917925",
+        "amount": 40000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_125",
+        "source": "17771917925",
+        "target": "513811562841",
+        "amount": 500.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_126",
+        "source": "513811782852",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_127",
+        "source": "17771917925",
+        "target": "513812601930",
+        "amount": 108000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_128",
+        "source": "Dr Ramakrishnan K S Lecturer Flat N",
+        "target": "17771917925",
+        "amount": 448107.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_129",
+        "source": "17771917925",
+        "target": "513812604662",
+        "amount": 189000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_130",
+        "source": "17771917925",
+        "target": "513812658300",
+        "amount": 11000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_131",
+        "source": "513812446295",
+        "target": "17771917925",
+        "amount": 60000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_132",
+        "source": "17771917925",
+        "target": "513812662016",
+        "amount": 49235.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_133",
+        "source": "17771917925",
+        "target": "513812684174",
+        "amount": 1000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_134",
+        "source": "513812476695",
+        "target": "17771917925",
+        "amount": 30000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_135",
+        "source": "17771917925",
+        "target": "9240100538 55907",
+        "amount": 20500.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_136",
+        "source": "17771917925",
+        "target": "33952010019 682",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_137",
+        "source": "513813562141",
+        "target": "17771917925",
+        "amount": 20000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_138",
+        "source": "17771917925",
+        "target": "6195020100 09758",
+        "amount": 100000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_139",
+        "source": "513814724665",
+        "target": "17771917925",
+        "amount": 55000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_140",
+        "source": "513815872839",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_141",
+        "source": "17771917925",
+        "target": "20235180292",
+        "amount": 12000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_142",
+        "source": "17771917925",
+        "target": "191101100635 69",
+        "amount": 46000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_143",
+        "source": "513815208590",
+        "target": "17771917925",
+        "amount": 25000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_144",
+        "source": "513816898208",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_145",
+        "source": "17771917925",
+        "target": "513816956281",
+        "amount": 65207.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_146",
+        "source": "513816901261",
+        "target": "17771917925",
+        "amount": 67000.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_147",
+        "source": "17771917925",
+        "target": "513818095533",
+        "amount": 50235.0,
+        "dates": [
+          "2025-05-18"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_148",
+        "source": "Neha",
+        "target": "17771917925",
+        "amount": 50000.0,
+        "dates": [
+          "2025-05-18",
+          "2025-05-19"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_149",
+        "source": "17771917925",
+        "target": "513908730836",
+        "amount": 3.0,
+        "dates": [
+          "2025-05-19"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_150",
+        "source": "513909506781",
+        "target": "17771917925",
+        "amount": 10000.0,
+        "dates": [
+          "2025-05-19"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_151",
+        "source": "513910665201",
+        "target": "17771917925",
+        "amount": 43028.0,
+        "dates": [
+          "2025-05-19"
+        ],
+        "risk_flag": "NORMAL"
+      }
+    },
+    {
+      "data": {
+        "id": "e_17771917925_152",
+        "source": "Pradee P Srivastava Mumbai",
+        "target": "17771917925",
+        "amount": 465564.0,
+        "dates": [
+          "2025-05-19",
+          "2025-06-13"
+        ],
+        "risk_flag": "SUSPICIOUS"
+      }
+    }
+  ]
+}

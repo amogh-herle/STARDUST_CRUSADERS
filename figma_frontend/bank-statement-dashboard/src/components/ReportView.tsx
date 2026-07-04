@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import cytoscape from "cytoscape";
 import {
   getAnalyticsStatus,
   chat,
   getLedgerTrace,
   getAccountTransactions,
+  getFullGraph,
   type AnalyticsStatus,
   type TopAccount,
   type UploadResult,
@@ -125,16 +126,24 @@ export default function ReportView({
   const [layoutName, setLayoutName] = useState<string>("concentric");
   const cyInstance = useRef<cytoscape.Core | null>(null);
 
+  // Incremental / Overview graph states
+  const [isOverviewMode, setIsOverviewMode] = useState(true);
+  const [totalTxnCount, setTotalTxnCount] = useState<number>(0);
+  const [minAmount, setMinAmount] = useState<number>(0);
+  const [minDateIndex, setMinDateIndex] = useState<number>(0);
+
   // Load transactions for the selected node
   useEffect(() => {
     if (!selectedNodeData?.id) {
       setNodeTransactions([]);
+      setTotalTxnCount(0);
       return;
     }
     setNodeTransactionsLoading(true);
     getAccountTransactions(selectedNodeData.id, 1, 100)
       .then((res) => {
         setNodeTransactions(res.items || []);
+        setTotalTxnCount(res.total || 0);
       })
       .catch((err) => {
         console.error("Failed to load node transactions:", err);
@@ -162,64 +171,126 @@ export default function ReportView({
     }
   }, [analytics, selectedAccountId]);
 
-  // Load ledger trace for the selected account
+  // Load overview graph or ledger trace depending on mode
   useEffect(() => {
-    if (!selectedAccountId) return;
-    setGraphLoading(true);
-    setSelectedNodeData(null);
-    getLedgerTrace(selectedAccountId)
-      .then((data) => {
-        setGraphData(data);
-      })
-      .catch((err) => {
-        console.error("Failed to load ledger trace:", err);
-      })
-      .finally(() => {
-        setGraphLoading(false);
-      });
-  }, [selectedAccountId]);
+    if (activeSubView !== "graph") return;
 
-  // Re-run layout if layout name changes
-  useEffect(() => {
-    if (cyInstance.current && graphData) {
-      const layout = cyInstance.current.layout({
-        name: layoutName,
-        animate: true,
-        fit: true,
-        padding: 30,
-        concentric: (node: any) => {
-          if (node.data("is_seed")) return 3;
-          return node.data("risk_tier") === "CRITICAL" || node.data("risk_tier") === "HIGH" ? 2 : 1;
-        },
-        levelWidth: () => 1,
-      } as any);
-      layout.run();
+    if (isOverviewMode) {
+      setGraphLoading(true);
+      getFullGraph(10)
+        .then((data) => {
+          setGraphData(data);
+        })
+        .catch((err) => {
+          console.error("Failed to load overview graph:", err);
+        })
+        .finally(() => {
+          setGraphLoading(false);
+        });
+    } else if (selectedAccountId) {
+      setGraphLoading(true);
+      setSelectedNodeData(null);
+      getLedgerTrace(selectedAccountId)
+        .then((data) => {
+          setGraphData(data);
+          setMinAmount(0);
+          setMinDateIndex(0);
+        })
+        .catch((err) => {
+          console.error("Failed to load ledger trace:", err);
+        })
+        .finally(() => {
+          setGraphLoading(false);
+        });
     }
-  }, [layoutName, graphData]);
+  }, [activeSubView, isOverviewMode, selectedAccountId]);
 
-  // Initialize Cytoscape
-  useEffect(() => {
-    if (!cyRef.current || !graphData) return;
+  // Compute filtered elements if in EGO mode and totalTxnCount < 30
+  const filteredElements = useMemo(() => {
+    if (!graphData) return [];
 
-    const elements: cytoscape.ElementDefinition[] = [];
-    
-    graphData.nodes.forEach((n) => {
-      elements.push({
-        group: "nodes",
-        data: {
-          id: n.data.id,
-          label: n.data.label,
-          bank: n.data.bank,
-          risk_score: n.data.risk_score,
-          risk_tier: n.data.risk_tier,
-          role: n.data.role,
-          is_seed: n.data.is_seed,
-          is_internal: n.data.is_internal,
-        },
+    // If in overview mode or txn count >= 30, show all elements
+    if (isOverviewMode || totalTxnCount >= 30) {
+      const elements: cytoscape.ElementDefinition[] = [];
+      graphData.nodes.forEach((n) => {
+        elements.push({
+          group: "nodes",
+          data: {
+            id: n.data.id,
+            label: n.data.label,
+            bank: n.data.bank,
+            risk_score: n.data.risk_score,
+            risk_tier: n.data.risk_tier,
+            role: n.data.role,
+            is_seed: n.data.is_seed || n.data.id === selectedAccountId,
+            is_internal: n.data.is_internal,
+          },
+        });
       });
+      graphData.edges.forEach((e) => {
+        elements.push({
+          group: "edges",
+          data: {
+            id: e.data.id,
+            source: e.data.source,
+            target: e.data.target,
+            amount: e.data.amount,
+            dates: e.data.dates,
+            risk_flag: e.data.risk_flag,
+          },
+        });
+      });
+      return elements;
+    }
+
+    // Otherwise (ego mode with < 30 txns), apply amount and date filters!
+    const allDates = Array.from(
+      new Set(graphData.edges.flatMap((e) => e.data.dates || []))
+    ).sort();
+    const minDateStr = allDates[minDateIndex] || "";
+
+    // Filter edges
+    const keptEdges = graphData.edges.filter((e) => {
+      if (e.data.amount < minAmount) return false;
+      if (minDateStr) {
+        const edgeDates = e.data.dates || [];
+        const hasMatchingDate = edgeDates.some((d) => d >= minDateStr);
+        if (!hasMatchingDate) return false;
+      }
+      return true;
     });
 
-    graphData.edges.forEach((e) => {
+    // Collect active node IDs
+    const activeNodeIds = new Set<string>();
+    if (selectedAccountId) {
+      activeNodeIds.add(selectedAccountId);
+    }
+    keptEdges.forEach((e) => {
+      activeNodeIds.add(e.data.source);
+      activeNodeIds.add(e.data.target);
+    });
+
+    // Construct elements
+    const elements: cytoscape.ElementDefinition[] = [];
+    graphData.nodes.forEach((n) => {
+      if (activeNodeIds.has(n.data.id)) {
+        elements.push({
+          group: "nodes",
+          data: {
+            id: n.data.id,
+            label: n.data.label,
+            bank: n.data.bank,
+            risk_score: n.data.risk_score,
+            risk_tier: n.data.risk_tier,
+            role: n.data.role,
+            is_seed: n.data.is_seed || n.data.id === selectedAccountId,
+            is_internal: n.data.is_internal,
+          },
+        });
+      }
+    });
+
+    keptEdges.forEach((e) => {
       elements.push({
         group: "edges",
         data: {
@@ -233,13 +304,38 @@ export default function ReportView({
       });
     });
 
+    return elements;
+  }, [graphData, isOverviewMode, totalTxnCount, minAmount, minDateIndex, selectedAccountId]);
+
+  // Re-run layout if layout name changes
+  useEffect(() => {
+    if (cyInstance.current && filteredElements.length > 0) {
+      const layout = cyInstance.current.layout({
+        name: layoutName,
+        animate: true,
+        fit: true,
+        padding: 30,
+        concentric: (node: any) => {
+          if (node.data("is_seed")) return 3;
+          return node.data("risk_tier") === "CRITICAL" || node.data("risk_tier") === "HIGH" ? 2 : 1;
+        },
+        levelWidth: () => 1,
+      } as any);
+      layout.run();
+    }
+  }, [layoutName, filteredElements]);
+
+  // Initialize Cytoscape
+  useEffect(() => {
+    if (!cyRef.current || filteredElements.length === 0) return;
+
     if (cyInstance.current) {
       cyInstance.current.destroy();
     }
 
     const cy = cytoscape({
       container: cyRef.current,
-      elements: elements,
+      elements: filteredElements,
       style: [
         {
           selector: "node",
@@ -248,8 +344,8 @@ export default function ReportView({
               const lbl = node.data("label") || node.data("id");
               return lbl.length > 12 ? lbl.substring(0, 10) + "..." : lbl;
             },
-            "width": (node: any) => (node.data("is_seed") ? 42 : 28),
-            "height": (node: any) => (node.data("is_seed") ? 42 : 28),
+            "width": (node: any) => (isOverviewMode ? 46 : (node.data("is_seed") ? 42 : 28)),
+            "height": (node: any) => (isOverviewMode ? 46 : (node.data("is_seed") ? 42 : 28)),
             "background-color": (node: any) => {
               if (node.data("is_seed")) return "#3b82f6"; // Vibrant blue seed
               const tier = node.data("risk_tier");
@@ -263,7 +359,7 @@ export default function ReportView({
             "font-weight": "bold",
             "text-valign": "bottom",
             "text-margin-y": 4,
-            "border-width": (node: any) => (node.data("is_seed") ? 3 : 1.5),
+            "border-width": (node: any) => (isOverviewMode ? 2 : (node.data("is_seed") ? 3 : 1.5)),
             "border-color": "#ffffff",
             "overlay-padding": "4px",
             "overlay-opacity": 0,
@@ -320,8 +416,13 @@ export default function ReportView({
     cy.on("tap", "node", (evt) => {
       const data = evt.target.data();
       setSelectedNodeData(data);
-      if (data && data.id && data.id !== selectedAccountId) {
-        setSelectedAccountId(data.id);
+      if (data && data.id) {
+        if (isOverviewMode) {
+          setIsOverviewMode(false);
+          setSelectedAccountId(data.id);
+        } else if (data.id !== selectedAccountId) {
+          setSelectedAccountId(data.id);
+        }
       }
     });
 
@@ -343,7 +444,7 @@ export default function ReportView({
         cyInstance.current = null;
       }
     };
-  }, [graphData, activeSubView]);
+  }, [filteredElements, activeSubView]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -519,56 +620,128 @@ export default function ReportView({
               <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 w-full">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                   <div>
-                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                    Interactive Money Trail Command Center
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Drill down and trace flow paths by clicking any node in the transaction graph.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <span>Layout:</span>
-                    <select
-                      value={layoutName}
-                      onChange={(e) => setLayoutName(e.target.value)}
-                      className="rounded border border-slate-200 px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-accent"
-                    >
-                      <option value="concentric">Concentric (Default)</option>
-                      <option value="cose">CoSE (Organic)</option>
-                      <option value="grid">Grid (Clean)</option>
-                      <option value="circle">Circle (Radial)</option>
-                    </select>
+                    <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                      Interactive Money Trail Command Center
+                      <span className="text-xs font-normal text-slate-500 ml-1">
+                        {isOverviewMode 
+                          ? "— Top 10 Accounts Overview" 
+                          : `— Account ${selectedAccountId} (${totalTxnCount} Txns)`}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Drill down and trace flow paths by clicking any node in the transaction graph.
+                    </p>
                   </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 1.2)}
-                      className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
-                      title="Zoom In"
-                    >
-                      ＋
-                    </button>
-                    <button
-                      onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() / 1.2)}
-                      className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
-                      title="Zoom Out"
-                    >
-                      －
-                    </button>
-                    <button
-                      onClick={() => {
-                        cyInstance.current?.fit();
-                        cyInstance.current?.center();
-                      }}
-                      className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
-                      title="Fit Window"
-                    >
-                      ⛶
-                    </button>
+                  <div className="flex items-center gap-3">
+                    {!isOverviewMode && (
+                      <button
+                        onClick={() => {
+                          setIsOverviewMode(true);
+                          setSelectedAccountId(null);
+                          setSelectedNodeData(null);
+                        }}
+                        className="rounded border border-blue-200 bg-blue-50 hover:bg-blue-100 p-1 px-2.5 text-xs font-semibold text-blue-600 transition-colors mr-1"
+                      >
+                        ← Back to Overview
+                      </button>
+                    )}
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <span>Layout:</span>
+                      <select
+                        value={layoutName}
+                        onChange={(e) => setLayoutName(e.target.value)}
+                        className="rounded border border-slate-200 px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-accent"
+                      >
+                        <option value="concentric">Concentric (Default)</option>
+                        <option value="cose">CoSE (Organic)</option>
+                        <option value="grid">Grid (Clean)</option>
+                        <option value="circle">Circle (Radial)</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 1.2)}
+                        className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
+                        title="Zoom In"
+                      >
+                        ＋
+                      </button>
+                      <button
+                        onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() / 1.2)}
+                        className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
+                        title="Zoom Out"
+                      >
+                        －
+                      </button>
+                      <button
+                        onClick={() => {
+                          cyInstance.current?.fit();
+                          cyInstance.current?.center();
+                        }}
+                        className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
+                        title="Fit Window"
+                      >
+                        ⛶
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+
+                {/* Incremental Filter Sliders for < 30 txn accounts */}
+                {!isOverviewMode && totalTxnCount < 30 && graphData && (
+                  <div className="mt-3 mb-2 p-3 bg-slate-50 border border-slate-200 rounded-lg flex flex-col md:flex-row gap-6">
+                    {/* Amount Filter Slider */}
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-medium text-slate-700">Minimum Transaction Amount</span>
+                        <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                          ₹{minAmount.toLocaleString()}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max={(() => {
+                          const maxAmt = Math.max(...graphData.edges.map(e => e.data.amount || 0), 1000);
+                          return maxAmt;
+                        })()}
+                        step={(() => {
+                          const maxAmt = Math.max(...graphData.edges.map(e => e.data.amount || 0), 1000);
+                          return Math.round(maxAmt / 50) || 10;
+                        })()}
+                        value={minAmount}
+                        onChange={(e) => setMinAmount(Number(e.target.value))}
+                        className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                    </div>
+
+                    {/* Date Filter Slider */}
+                    {(() => {
+                      const allDates = Array.from(new Set(graphData.edges.flatMap(e => e.data.dates || []))).sort();
+                      if (allDates.length <= 1) return null;
+                      return (
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-medium text-slate-700">Filter Transactions From Date</span>
+                            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                              {allDates[minDateIndex] || "All Dates"}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max={allDates.length - 1}
+                            step="1"
+                            value={minDateIndex}
+                            onChange={(e) => setMinDateIndex(Number(e.target.value))}
+                            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 border border-slate-200 rounded-xl overflow-hidden min-h-[460px]">
                 {/* Graph View (Left columns) */}

@@ -3,7 +3,7 @@
  * Base URL is read from NEXT_PUBLIC_API_URL (default: http://localhost:8000)
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -141,6 +141,16 @@ export async function getLedgerTrace(accountId: string): Promise<CytoscapeGraph>
   if (!res.ok) throw new Error(`Failed to fetch ledger trace for account ${accountId}`);
   return res.json();
 }
+
+/**
+ * Fetch the full overview transaction graph (paginated by accounts count).
+ */
+export async function getFullGraph(limitAccounts: number = 10): Promise<CytoscapeGraph> {
+  const res = await fetch(`${BASE}/api/v1/graph/cytoscape-overview?limit_accounts=${limitAccounts}`);
+  if (!res.ok) throw new Error("Failed to fetch full overview graph");
+  return res.json();
+}
+
 
 export interface Transaction {
   id: string;

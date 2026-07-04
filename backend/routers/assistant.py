@@ -19,21 +19,13 @@ router = APIRouter(prefix="/assistant", tags=["Assistant"])
 
 analytics_root = Path(__file__).resolve().parents[2] / "phase8" / "analytics"
 
-# ---------------------------------------------------------------------------
-# Pick the assistant backend based on config
-# ---------------------------------------------------------------------------
-if settings.QWEN_ENABLED:
-    from services.qwen_assistant_service import QwenAssistantService
+from services.qwen_assistant_service import QwenAssistantService
 
-    assistant_service = QwenAssistantService(
-        analytics_root=str(analytics_root),
-        base_url=settings.QWEN_BASE_URL,
-        model_name=settings.QWEN_MODEL_NAME,
-    )
-else:
-    from services.assistant_service import AssistantService
-
-    assistant_service = AssistantService(str(analytics_root))
+assistant_service = QwenAssistantService(
+    analytics_root=str(analytics_root),
+    base_url=settings.QWEN_BASE_URL,
+    model_name=settings.QWEN_MODEL_NAME,
+)
 
 
 @router.post("/chat", response_model=AssistantChatResponse)

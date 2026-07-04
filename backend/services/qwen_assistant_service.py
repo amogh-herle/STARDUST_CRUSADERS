@@ -10,8 +10,7 @@ multi-turn tool-calling loop:
         → Qwen picks another tool or answers
         (max 3 hops)
 
-Uses Ollama's OpenAI-compatible /v1/chat/completions endpoint via httpx.
-No new SDK dependency — httpx ships with FastAPI/Starlette.
+Uses Ollama's OpenAI-compatible /v1/chat/completions endpoint via the openai Python SDK.
 """
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
+from openai import OpenAI
 
 from services.analytics_repository import AnalyticsRepository
 from services.prompts import QWEN_SYSTEM_PROMPT
@@ -87,7 +86,9 @@ class QwenAssistantService:
         self.tools = AssistantTools(self.repository)
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
-        self._client = httpx.Client(timeout=REQUEST_TIMEOUT)
+        
+        # Use OpenAI SDK pointing at the local server (e.g. Ollama or vLLM)
+        self._client = OpenAI(base_url=f"{self.base_url}/v1", api_key="ollama")
 
     # ------------------------------------------------------------------
     # Public API — matches AssistantService.ask()
@@ -120,24 +121,23 @@ class QwenAssistantService:
         for hop in range(MAX_TOOL_HOPS):
             response = self._call_qwen(messages)
 
-            # --- Model decided to answer directly (no tool calls) ---
-            if not response.get("tool_calls"):
-                content = response.get("content", "")
+            if not getattr(response, "tool_calls", None):
+                content = getattr(response, "content", "") or ""
                 answer = _strip_thinking(content)
                 sources = _extract_sources_from_tool_names(tool_names_called)
                 return answer, sources
 
             # --- Model wants to call tool(s) ---
             # Append the assistant message with tool_calls to the history
-            messages.append({
-                "role": "assistant",
-                "content": response.get("content", ""),
-                "tool_calls": response["tool_calls"],
-            })
+            
+            tool_calls_raw = getattr(response, "tool_calls")
+            
+            # OpenAI SDK representation of the message to append back
+            messages.append(response)
 
-            for call in response["tool_calls"]:
-                func_name = call["function"]["name"]
-                raw_args = call["function"].get("arguments", "{}")
+            for call in tool_calls_raw:
+                func_name = call.function.name
+                raw_args = call.function.arguments or "{}"
 
                 # Parse arguments — handle both string and dict forms
                 if isinstance(raw_args, str):
@@ -163,7 +163,7 @@ class QwenAssistantService:
                 # Feed the tool result back into the conversation
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": call.get("id", f"call_{hop}_{func_name}"),
+                    "tool_call_id": getattr(call, "id", f"call_{hop}_{func_name}"),
                     "content": json.dumps(result, default=str),
                 })
 
@@ -177,7 +177,8 @@ class QwenAssistantService:
             ),
         })
         response = self._call_qwen(messages, include_tools=False)
-        answer = _strip_thinking(response.get("content", ""))
+        content = getattr(response, "content", "") or ""
+        answer = _strip_thinking(content)
         if not answer:
             answer = (
                 "I found some relevant data but need a bit more to fully "
@@ -194,62 +195,43 @@ class QwenAssistantService:
         self,
         messages: List[Dict[str, Any]],
         include_tools: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """
-        POST to Ollama's /v1/chat/completions (OpenAI-compatible).
-
-        Returns the first choice's message dict, which may contain:
-        - "content": str  (the text answer)
-        - "tool_calls": list[dict]  (tool invocations)
+        Calls the local Qwen model using the OpenAI SDK.
+        Returns the first choice's message object.
         """
-        url = f"{self.base_url}/v1/chat/completions"
-
-        payload: Dict[str, Any] = {
-            "model": self.model_name,
-            "messages": messages,
-            "temperature": DEFAULT_TEMPERATURE,
-            "max_tokens": DEFAULT_MAX_TOKENS,
-        }
-        if include_tools:
-            payload["tools"] = QWEN_TOOL_SCHEMA
-
-        logger.debug("Qwen request → %s tools=%s", url, include_tools)
+        logger.debug("Qwen request → %s tools=%s", self.base_url, include_tools)
 
         try:
-            resp = self._client.post(url, json=payload)
-            resp.raise_for_status()
-        except httpx.ConnectError:
-            logger.error(
-                "Cannot reach Qwen at %s — is Ollama running?", self.base_url
-            )
-            return {
-                "content": (
+            kwargs = {
+                "model": self.model_name,
+                "messages": messages,
+                "temperature": DEFAULT_TEMPERATURE,
+                "max_tokens": DEFAULT_MAX_TOKENS,
+            }
+            if include_tools:
+                kwargs["tools"] = QWEN_TOOL_SCHEMA
+                kwargs["tool_choice"] = "auto"
+                
+            resp = self._client.chat.completions.create(**kwargs)
+            return resp.choices[0].message
+            
+        except Exception as exc:
+            logger.error("Qwen API error: %s", exc)
+            # Return a dummy object matching the structure for fallback
+            class DummyMessage:
+                content = (
                     "I'm sorry, I can't reach the local AI model right now. "
-                    "Please make sure Ollama is running and try again."
+                    "Please make sure it is running and try again."
                 )
-            }
-        except httpx.HTTPStatusError as exc:
-            logger.error("Qwen HTTP error: %s", exc)
-            return {
-                "content": (
-                    "The AI model returned an error. Please try again in a "
-                    "moment, or contact your system administrator."
-                )
-            }
-
-        data = resp.json()
-        choices = data.get("choices", [])
-        if not choices:
-            return {"content": "No response from the model."}
-
-        message = choices[0].get("message", {})
-        return message
+                tool_calls = None
+            return DummyMessage()
 
     # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
     def close(self) -> None:
-        """Close the underlying httpx client."""
+        """Close the underlying client."""
         self._client.close()
 
     def __del__(self) -> None:
