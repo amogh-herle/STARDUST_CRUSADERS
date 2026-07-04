@@ -1,0 +1,78 @@
+{
+  "run_timestamp": "2026-07-04T11:45:48.697969",
+  "input_file": "ingested_transactions.csv",
+  "rows_input": 202789,
+  "date_validation": {
+    "null_dates": 0,
+    "bad_format_dates": 0,
+    "out_of_range_dates": 0,
+    "reformatted_dates": 0
+  },
+  "amount_cleaning": {
+    "amount_corrections": 0,
+    "zero_debit_credit_rows": 11,
+    "lakh_crore_conversions": 0
+  },
+  "text_normalisation": {
+    "narrations_cleaned": 185819,
+    "channels_normalised": 0,
+    "account_ids_stripped": 197
+  },
+  "deduplication": {
+    "exact_duplicates_found": 37577,
+    "near_duplicates_flagged": 59372,
+    "utr_collisions_flagged": 4378,
+    "multi_file_collisions_flagged": 0,
+    "rows_before": 202789,
+    "rows_after": 165212
+  },
+  "transaction_type_validation": {
+    "invalid_transaction_rows": 27,
+    "both_negative_rows": 0
+  },
+  "balance_validation": {
+    "accounts_checked": 112,
+    "accounts_with_breaches": 72,
+    "total_breach_rows": 31562,
+    "max_single_breach_amt": 5380833.140000001,
+    "accounts_balance_untracked": 4,
+    "n_suspect_accounts": 38,
+    "n_balance_untracked_accounts": 4
+  },
+  "counterparty_validation": {
+    "self_transfers_flagged": 52,
+    "malformed_ifsc_flagged": 794
+  },
+  "outlier_flagging": {
+    "accounts_analysed": 111,
+    "outlier_rows_flagged": 13422
+  },
+  "velocity_flagging": {
+    "velocity_accounts_flagged": 5,
+    "velocity_rows_flagged": 657
+  },
+  "narration_integrity": {
+    "empty_narration_rows": 22
+  },
+  "missing_values": {
+    "missing_account_id": 0,
+    "missing_date": 0,
+    "missing_narration_filled": 0,
+    "missing_amount_filled": 0,
+    "missing_balance": 0,
+    "missing_utr": 130001,
+    "missing_time_defaulted": 0
+  },
+  "quality_assessment": {
+    "rows_scored": 165212,
+    "band_counts": {
+      "HIGH": 130210,
+      "MEDIUM": 34997,
+      "LOW": 5
+    },
+    "avg_quality_score": 86.75
+  },
+  "rows_output": 165212,
+  "rows_with_any_flag": 145655,
+  "rows_fully_clean": 19557
+}
