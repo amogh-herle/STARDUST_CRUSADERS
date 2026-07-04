@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Phase 8 Risk Calibration Report</title>
+<style>body{font-family:Arial,sans-serif;margin:24px;}h1,h2,h3{color:#14213d;}table{border-collapse:collapse;width:100%;margin-bottom:24px;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background:#f4f4f4;}code{background:#f4f4f4;padding:2px 4px;border-radius:4px;}</style>
+</head><body>
+<h1>Phase 8 Risk Calibration & Investigator Case Report</h1>
+<p><strong>Date:</strong> 2026-07-01</p>
+<h2>1. Risk Tier Thresholds</h2>
+<ul>
+<li><strong>CRITICAL</strong>: score ≥ 75</li>
+<li><strong>HIGH</strong>: score ≥ 50</li>
+<li><strong>MEDIUM</strong>: score ≥ 25</li>
+<li><strong>LOW</strong>: score ≥ 0</li>
+</ul>
+<h2>2. Risk Score Distribution</h2>
+<p>Observed score range: <strong>6.6</strong> to <strong>32.6</strong>. Mean: <strong>19.88</strong>. Median: <strong>19.0</strong>.</p>
+<table><thead><tr><th>Tier</th><th>Account Count</th></tr></thead><tbody>
+<tr><td>CRITICAL</td><td>0</td></tr>
+<tr><td>HIGH</td><td>0</td></tr>
+<tr><td>MEDIUM</td><td>6</td></tr>
+<tr><td>LOW</td><td>13</td></tr>
+</tbody></table>
+<h3>Score bins</h3><table><thead><tr><th>Range</th><th>Accounts</th></tr></thead><tbody>
+<tr><td>(-0.101, 10.0]</td><td>1</td></tr>
+<tr><td>(10.0, 20.0]</td><td>9</td></tr>
+<tr><td>(20.0, 25.0]</td><td>4</td></tr>
+<tr><td>(25.0, 30.0]</td><td>3</td></tr>
+<tr><td>(30.0, 40.0]</td><td>2</td></tr>
+<tr><td>(40.0, 50.0]</td><td>0</td></tr>
+<tr><td>(50.0, 75.0]</td><td>0</td></tr>
+<tr><td>(75.0, 100.0]</td><td>0</td></tr>
+</tbody></table>
+<h2>3. Calibration Assessment</h2>
+<p><strong>Conclusion:</strong> Current thresholds are too conservative for this dataset. No account reaches <strong>HIGH</strong> or <strong>CRITICAL</strong>, although the top accounts display multiple strong AML signals including round-trip, fan-in, fan-out, smurfing, high-value, velocity, isolation, and graph centrality.</p>
+<p>The current absolute thresholds are:</p><ul><li>CRITICAL ≥ 75</li><li>HIGH ≥ 50</li><li>MEDIUM ≥ 25</li><li>LOW ≥ 0</li></ul>
+<p>With only 19 internal accounts analysed, these thresholds make the top suspicious accounts appear only in the MEDIUM tier, despite clear multi-signal behavior.</p>
+<h3>Recommended recalibration</h3>
+<ul><li>Lower <strong>HIGH</strong> to <strong>30</strong> and <strong>CRITICAL</strong> to <strong>45</strong> for this dataset, while preserving the same tier labels.</li><li>Keep <strong>MEDIUM</strong> at <strong>25</strong> to preserve explainability, or allow a secondary label such as <em>Suspect</em> for 20–25.</li><li>Consider a hybrid approach: maintain absolute thresholds but add dataset-relative quantile flags (top 20% as <strong>high alert</strong>).</li><li>Preserve transparency by documenting that tier thresholds are dataset-dependent and should be reviewed when input volume is small.</li></ul>
+<h2>4. Top 10 Account Case Reports</h2>
+<h3>99572217148131 — Score 32.6 — MEDIUM</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Community</th><td>2 (size 250, flow 77690662.1, internal_ratio 0.024)</td></tr>
+<tr><th>Top community accounts</th><td>['99572217148131', '95773447976527', '72615533841078', '43920027363506', '50192424882238']</td></tr>
+<tr><th>Isolation mean/max</th><td>1.0823544325576944 / 1.1771648234422012</td></tr>
+<tr><th>Graph risk score</th><td>0.0108 (pagerank 8.8e-05, betweenness 0.0, degree 0.009794)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: True (1 lines); Backward exists: True (1 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Round-trip indicators present (0.77 intensity) | Collector behaviour: 14 senders | Distributor behaviour: 5 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> Likely a pass-through/round-trip hub with funds cycled through HEAD OFFICE and external counterparties, showing both collection and distribution behavior.</p>
+<p><strong>Recommended actions:</strong> Verify HEAD OFFICE counterparties, reconstruct inbound/outbound flows, confirm beneficiary identity, and escalate for manual KYC/KYB review.</p>
+<h3>18306700003 — Score 32.2 — MEDIUM</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Community</th><td>10 (size 34, flow 17066053.0, internal_ratio 0.029)</td></tr>
+<tr><th>Top community accounts</th><td>['18306700003', 'IDFC00', 'POOJA', 'PALLAV', '509409954846']</td></tr>
+<tr><th>Isolation mean/max</th><td>0.9897050746865758 / 1.0954822836537814</td></tr>
+<tr><th>Graph risk score</th><td>0.0033 (pagerank 8.8e-05, betweenness 0.0, degree 0.002912)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Round-trip indicators present (0.39 intensity) | Collector behaviour: 33 senders | Distributor behaviour: 5 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> High-value round-trip account with velocity bursts and external distribution, suggesting possible laundering via short-lived cyclical transfers.</p>
+<p><strong>Recommended actions:</strong> Trace the 282,382 return flow; identify external beneficiaries; review account statements for anomalous balance changes.</p>
+<h3>8642666611469255 — Score 27.7 — MEDIUM</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDBI Bank</td></tr>
+<tr><th>Community</th><td>7 (size 88, flow 864348.96, internal_ratio 0.011)</td></tr>
+<tr><th>Top community accounts</th><td>['8642666611469255', '507825890184', '508438057069', '508612856567', '509909618414']</td></tr>
+<tr><th>Isolation mean/max</th><td>0.9608528856266566 / 1.1489834000314945</td></tr>
+<tr><th>Graph risk score</th><td>0.0085 (pagerank 8.8e-05, betweenness 0.0, degree 0.007676)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> ROUND_TRIP | FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH</p>
+<p><strong>Risk score breakdown:</strong> Round-trip indicators present (0.61 intensity) | Collector behaviour: 13 senders | Distributor behaviour: 10 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues</p>
+<p><strong>Investigator hypothesis:</strong> A likely mule/pass-through account due to identical 10,000 return transfers and structured bypass activity.</p>
+<p><strong>Recommended actions:</strong> Confirm whether 25 NFS is an internal vendor or external party; match transaction UTRs and provenance of funds.</p>
+<h3>00869354051 — Score 27.4 — MEDIUM</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Community</th><td>11 (size 71, flow 14402961.0, internal_ratio 0.014)</td></tr>
+<tr><th>Top community accounts</th><td>['00869354051', '8022447922', '5608575305', '3044773383 3', '512617630634']</td></tr>
+<tr><th>Isolation mean/max</th><td>0.9463288295542097 / 1.0664052041422087</td></tr>
+<tr><th>Graph risk score</th><td>0.007 (pagerank 8.8e-05, betweenness 0.0, degree 0.006353)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 24 senders | Distributor behaviour: 33 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> Aggregator/distributor behavior with many inbound sources and many outbound recipients; consistent with an intermediary laundering account.</p>
+<p><strong>Recommended actions:</strong> Review beneficiary list, request source documentation for incoming funds, and examine account owner relationships to outgoing payees.</p>
+<h3>17771917925 — Score 26.2 — MEDIUM</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Community</th><td>4 (size 81, flow 13907439.0, internal_ratio 0.012)</td></tr>
+<tr><th>Top community accounts</th><td>['17771917925', '513716317097', '513508415750', '2618020000 1952', '513812658300']</td></tr>
+<tr><th>Isolation mean/max</th><td>0.976637778898701 / 1.102268339886827</td></tr>
+<tr><th>Graph risk score</th><td>0.0079 (pagerank 8.8e-05, betweenness 0.0, degree 0.007147)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 15 senders | Distributor behaviour: 25 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> High-velocity collector/distributor with structured transfers, likely used to split and layer incoming funds.</p>
+<p><strong>Recommended actions:</strong> Focus on velocity windows and repeated destination patterns; verify whether destinations are related entities or mule accounts.</p>
+<h3>098030016134598 — Score 25.0 — MEDIUM</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>Yes Bank</td></tr>
+<tr><th>Community</th><td>12 (size 10405, flow 71927138.74, internal_ratio 0.0)</td></tr>
+<tr><th>Top community accounts</th><td>['098030016134598', '175137310603000019', '139971290403000002', '180266080603000007', '892751270603000076']</td></tr>
+<tr><th>Isolation mean/max</th><td>1.0519557344628288 / 1.1793916272907214</td></tr>
+<tr><th>Graph risk score</th><td>1.0 (pagerank 8.8e-05, betweenness 0.0, degree 0.917946)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | NEW_HV_BENE | GRAPH_CENTRAL</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 101 senders | Distributor behaviour: 3260 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | New high-value beneficiary | Graph-central account by PageRank/betweenness/degree</p>
+<p><strong>Investigator hypothesis:</strong> Graph-central hub with massive fan-in/fan-out and external network dominance; potentially the principal disbursement node.</p>
+<p><strong>Recommended actions:</strong> Treat as high-priority hub; investigate the 3,260 receivers and source counterparties for possible banned networks.</p>
+<h3>92883409730 — Score 22.7 — LOW</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>nan</td></tr>
+<tr><th>Bank</th><td>IDFC FIRST Bank</td></tr>
+<tr><th>Community</th><td>8 (size 69, flow 14339015.0, internal_ratio 0.014)</td></tr>
+<tr><th>Top community accounts</th><td>['92883409730', '2618020000 1947', '2010302489 54', '8031646289', '2020009595 7348']</td></tr>
+<tr><th>Isolation mean/max</th><td>0.9592022165596286 / 1.0780609317955165</td></tr>
+<tr><th>Graph risk score</th><td>0.0068 (pagerank 8.8e-05, betweenness 0.0, degree 0.006176)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | VELOCITY | HIGH_VALUE | BALANCE_BREACH</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 18 senders | Distributor behaviour: 26 receivers | Structured similarly sized transfers relative to own activity | Velocity bursts from Phase 7 | Per-account high-value outliers from Phase 7 | Statement balance continuity issues</p>
+<p><strong>Investigator hypothesis:</strong> Structured fan-in/out account with velocity and high-value flags; likely part of a broader splitting network.</p>
+<p><strong>Recommended actions:</strong> Evaluate payout patterns and beneficiary relationships; compare to other IDFC FIRST Bank accounts in the same community.</p>
+<h3>24704559049070 — Score 21.2 — LOW</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Community</th><td>5 (size 95, flow 22853304.71, internal_ratio 0.011)</td></tr>
+<tr><th>Top community accounts</th><td>['24704559049070', '512913825093', '513312996541', 'BDBLR62025051318517 449', 'BDBLR62025051318515 544']</td></tr>
+<tr><th>Isolation mean/max</th><td>1.0835898846504035 / 1.195656862852381</td></tr>
+<tr><th>Graph risk score</th><td>0.0093 (pagerank 8.8e-05, betweenness 0.0, degree 0.00847)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 9 senders | Distributor behaviour: 14 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> Mixed collector/distributor with external new-beneficiary risk; possibly channeling funds through a new distribution node.</p>
+<p><strong>Recommended actions:</strong> Verify the new high-value counterparty behavior and audit the chain of custody for funds leaving this account.</p>
+<h3>95773447976527 — Score 20.6 — LOW</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Community</th><td>2 (size 250, flow 77690662.1, internal_ratio 0.024)</td></tr>
+<tr><th>Top community accounts</th><td>['99572217148131', '95773447976527', '72615533841078', '43920027363506', '50192424882238']</td></tr>
+<tr><th>Isolation mean/max</th><td>1.0874921437542442 / 1.2103624383817322</td></tr>
+<tr><th>Graph risk score</th><td>0.0041 (pagerank 8.8e-05, betweenness 0.0, degree 0.003706)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | BALANCE_BREACH | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 10 senders | Distributor behaviour: 31 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | Statement balance continuity issues | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> Isolation anomaly suggests this account behaves unusually relative to its peers; likely a non-standard participant in the same medium-risk community.</p>
+<p><strong>Recommended actions:</strong> Investigate why the account is an outlier and whether it serves as a gateway between multiple external counterparties.</p>
+<h3>61577175569879 — Score 19.0 — LOW</h3>
+<table><tbody>
+<tr><th>Account holder</th><td>Indian</td></tr>
+<tr><th>Bank</th><td>Bandhan Bank</td></tr>
+<tr><th>Community</th><td>1 (size 36, flow 6655804.0, internal_ratio 0.028)</td></tr>
+<tr><th>Top community accounts</th><td>['61577175569879', '508611520909', 'REFERENCE 506211004163', 'REFERENCE 506211032139', '508608512894']</td></tr>
+<tr><th>Isolation mean/max</th><td>1.0712016910243958 / 1.1844366767408718</td></tr>
+<tr><th>Graph risk score</th><td>0.0037 (pagerank 8.8e-05, betweenness 0.0, degree 0.003265)</td></tr>
+<tr><th>Money trails</th><td>Forward exists: False (0 lines); Backward exists: False (0 lines)</td></tr>
+</tbody></table>
+<p><strong>Triggered AML Patterns:</strong> FAN_IN | FAN_OUT | SMURFING | HIGH_VALUE | NEW_HV_BENE</p>
+<p><strong>Risk score breakdown:</strong> Collector behaviour: 8 senders | Distributor behaviour: 14 receivers | Structured similarly sized transfers relative to own activity | Per-account high-value outliers from Phase 7 | New high-value beneficiary</p>
+<p><strong>Investigator hypothesis:</strong> Smurfing/distribution account with limited but suspicious external flow; likely a smaller mule or collection node.</p>
+<p><strong>Recommended actions:</strong> Review the 8 inbound sources and 14 receivers; cross-check for known mule patterns or repeated beneficiary names.</p>
+</body></html>
