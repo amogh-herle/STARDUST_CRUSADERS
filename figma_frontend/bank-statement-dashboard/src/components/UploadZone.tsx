@@ -2,6 +2,8 @@
 
 import { useCallback, useRef, useState } from "react";
 import { uploadStatements, type UploadResult } from "@/lib/api";
+import { getSession } from "@/lib/auth";
+import { NewCaseModal, type Case } from "./Topbar";
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".csv", ".xlsx", ".xls", ".docx", ".png", ".jpg", ".jpeg"];
 
@@ -33,7 +35,12 @@ export default function UploadZone({
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string>("");
+  const [showConfirmCase, setShowConfirmCase] = useState(false);
+  const [uploadedResult, setUploadedResult] = useState<UploadResult | null>(null);
+  const [caseConfirmed, setCaseConfirmed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const user = getSession();
 
   const addFiles = useCallback((incoming: FileList | null) => {
     if (!incoming) return;
@@ -74,12 +81,18 @@ export default function UploadZone({
       const result = await uploadStatements(validFiles.map((f) => f.file));
       clearInterval(interval);
       setUploadState("done");
+      setUploadedResult(result);
       onSubmit(validFiles.map((f) => f.file), result);
     } catch (err) {
       clearInterval(interval);
       setUploadState("error");
       setUploadError(err instanceof Error ? err.message : "Unknown error");
     }
+  };
+
+  const handleCaseCreated = (newCase: Case) => {
+    setCaseConfirmed(true);
+    setShowConfirmCase(false);
   };
 
   return (
@@ -147,8 +160,18 @@ export default function UploadZone({
             </div>
           ))}
 
-          {/* Analyze button / loading / error */}
-          {uploadState === "idle" && (
+          {/* Confirm Case button (after files uploaded) / Analyze button (after case confirmed) / loading / error */}
+          {uploadState === "idle" && !caseConfirmed && (
+            <button
+              onClick={() => setShowConfirmCase(true)}
+              disabled={validFiles.length === 0}
+              className="mt-2 w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Confirm Case Details
+            </button>
+          )}
+
+          {uploadState === "idle" && caseConfirmed && (
             <button
               onClick={handleAnalyze}
               disabled={validFiles.length === 0}
@@ -187,6 +210,12 @@ export default function UploadZone({
             </div>
           )}
 
+          {uploadState === "done" && (
+            <div className="mt-2 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+              <span className="font-medium">✓ Analysis complete!</span> Files processed successfully.
+            </div>
+          )}
+
           {uploadState === "error" && (
             <div className="mt-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
               <span className="font-medium">Pipeline error: </span>
@@ -203,6 +232,15 @@ export default function UploadZone({
             </div>
           )}
         </div>
+      )}
+
+      {/* Case confirmation modal */}
+      {showConfirmCase && user && (
+        <NewCaseModal
+          userId={user.id}
+          onClose={() => setShowConfirmCase(false)}
+          onCreated={handleCaseCreated}
+        />
       )}
     </div>
   );
