@@ -56,42 +56,10 @@ validator.py, so clean.py can log it into all_actions.csv identically.
 
 import pandas as pd
 
+from audit_utils import _add, _action, _is_blank
 from cleaning_config import (
     MISSING_TIME_DEFAULT, MISSING_NARRATION_FILL, MISSING_AMOUNT_FILL,
 )
-
-
-def _add(existing: str, flag: str) -> str:
-    existing = str(existing).strip() if existing else ""
-    return flag if not existing else existing + " | " + flag
-
-
-def _action(df: pd.DataFrame, row_idx, action_type: str, detail: str) -> dict:
-    try:
-        row = df.loc[row_idx]
-        return {
-            "row_index":   row_idx,
-            "account_id":  row.get("account_id", ""),
-            "date":        row.get("date", ""),
-            "narration":   str(row.get("narration", ""))[:80],
-            "debit":       row.get("debit", ""),
-            "credit":      row.get("credit", ""),
-            "balance":     row.get("balance", ""),
-            "source_file": row.get("source_file", ""),
-            "action_type": action_type,
-            "detail":      detail,
-        }
-    except Exception:
-        return {
-            "row_index": row_idx, "account_id": "", "date": "",
-            "narration": "", "debit": "", "credit": "", "balance": "",
-            "source_file": "", "action_type": action_type, "detail": detail,
-        }
-
-
-def _is_blank(series: pd.Series) -> pd.Series:
-    """True where a value is NaN, None, or an empty/whitespace-only string."""
-    return series.isna() | (series.astype(str).str.strip() == "")
 
 
 def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
@@ -110,29 +78,41 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     df["clean_flags"] = df.get("clean_flags", "")
 
     # ── account_id — flag only, never imputed ───────────────────────────
+    # Vectorized (Task 1): use .loc instead of row-by-row .at assignment
     if "account_id" in df.columns:
         mask = _is_blank(df["account_id"])
         report["missing_account_id"] = int(mask.sum())
-        for idx in df.index[mask]:
-            df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_ACCOUNT_ID")
-            actions.append(_action(df, idx, "MISSING_ACCOUNT_ID",
-                "account_id is empty — row kept but cannot be grouped with "
-                "any account for dedup/continuity/outlier/velocity checks"))
+        if mask.any():
+            df.loc[mask, "clean_flags"] = df.loc[mask, "clean_flags"].apply(
+                lambda f: _add(f, "MISSING_ACCOUNT_ID")
+            )
+            for idx in df.index[mask]:
+                actions.append(_action(df, idx, "MISSING_ACCOUNT_ID",
+                    "account_id is empty — row kept but cannot be grouped with "
+                    "any account for dedup/continuity/outlier/velocity checks"))
 
     # ── date — already flagged NULL_DATE upstream; just count it here ──
     if "date" in df.columns:
         report["missing_date"] = int(_is_blank(df["date"]).sum())
 
     # ── narration — safe to fill with NULL (spec: not a text placeholder) ──
+    # Vectorized (Task 1): bulk assignment with .loc
     if "narration" in df.columns:
         mask = _is_blank(df["narration"])
-        for idx in df.index[mask]:
-            original = df.at[idx, "narration"]
-            df.at[idx, "narration"] = MISSING_NARRATION_FILL
-            df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_NARRATION_FILLED")
-            actions.append(_action(df, idx, "MISSING_NARRATION_FILLED",
-                f"narration was empty ('{original}') — left NULL "
-                f"(flagged, not fabricated with a placeholder string)"))
+        if mask.any():
+            # Store original values for action log
+            original_narrations = df.loc[mask, "narration"].copy()
+            # Bulk assignment
+            df.loc[mask, "narration"] = MISSING_NARRATION_FILL
+            df.loc[mask, "clean_flags"] = df.loc[mask, "clean_flags"].apply(
+                lambda f: _add(f, "MISSING_NARRATION_FILLED")
+            )
+            # Log actions (still need individual rows for audit trail)
+            for idx in df.index[mask]:
+                original = original_narrations.loc[idx]
+                actions.append(_action(df, idx, "MISSING_NARRATION_FILLED",
+                    f"narration was empty ('{original}') — left NULL "
+                    f"(flagged, not fabricated with a placeholder string)"))
         report["missing_narration_filled"] = int(mask.sum())
 
     # ── debit / credit — safe to fill with 0.0 ──────────────────────────
@@ -151,18 +131,34 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     # that may simply have its amount column mis-mapped — that's flagged
     # instead, following the same "never guess" principle as account_id/
     # date/balance.
-    debit_missing_mask  = (df.get("_missing_debit")  if "_missing_debit"  in df.columns
-                            else pd.Series(False, index=df.index)).fillna(False).astype(bool)
-    credit_missing_mask = (df.get("_missing_credit") if "_missing_credit" in df.columns
-                            else pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    # Task 6: Tighten coupling with clean_amounts — if _missing_<col>
+    # columns aren't present, this is a loud assertion failure rather than
+    # a silent fallback to `.isna()` (which would quietly turn off missing-
+    # amount detection if clean_amounts() is ever refactored and forgets to
+    # populate these masks).
+    if "_missing_debit" not in df.columns or "_missing_credit" not in df.columns:
+        raise AssertionError(
+            "handle_missing_values() requires _missing_debit and _missing_credit "
+            "columns to be present (these should be created by clean_amounts() in "
+            "Module 1b, validator.py). If you see this error, clean_amounts() was "
+            "either not run, or was refactored and no longer populates these masks. "
+            "Missing-amount detection cannot proceed without them."
+        )
+
+    debit_missing_mask  = df["_missing_debit"].fillna(False).astype(bool)
+    credit_missing_mask = df["_missing_credit"].fillna(False).astype(bool)
 
     both_missing_mask = debit_missing_mask & credit_missing_mask
     report["both_amounts_missing"] = int(both_missing_mask.sum())
-    for idx in df.index[both_missing_mask]:
-        df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "BOTH_AMOUNTS_MISSING")
-        actions.append(_action(df, idx, "BOTH_AMOUNTS_MISSING",
-            "Both debit AND credit are missing on this row — not auto-filled "
-            "(likely a mis-mapped amount column); flagged for investigator review"))
+    if both_missing_mask.any():
+        # Vectorized (Task 1): bulk flag assignment
+        df.loc[both_missing_mask, "clean_flags"] = df.loc[both_missing_mask, "clean_flags"].apply(
+            lambda f: _add(f, "BOTH_AMOUNTS_MISSING")
+        )
+        for idx in df.index[both_missing_mask]:
+            actions.append(_action(df, idx, "BOTH_AMOUNTS_MISSING",
+                "Both debit AND credit are missing on this row — not auto-filled "
+                "(likely a mis-mapped amount column); flagged for investigator review"))
 
     for col, missing_mask, opposite_missing_mask in (
         ("debit",  debit_missing_mask,  credit_missing_mask),
@@ -173,12 +169,16 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
         # Safe to fill only when this side is missing AND the opposite
         # side is NOT missing (i.e. genuinely a one-sided row).
         fill_mask = missing_mask & ~opposite_missing_mask
-        for idx in df.index[fill_mask]:
-            df.at[idx, col] = MISSING_AMOUNT_FILL
-            df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_AMOUNT_FILLED")
-            actions.append(_action(df, idx, "MISSING_AMOUNT_FILLED",
-                f"{col} was missing but the opposite side has a value — "
-                f"filled {col} with {MISSING_AMOUNT_FILL}"))
+        if fill_mask.any():
+            # Vectorized (Task 1): bulk assignment
+            df.loc[fill_mask, col] = MISSING_AMOUNT_FILL
+            df.loc[fill_mask, "clean_flags"] = df.loc[fill_mask, "clean_flags"].apply(
+                lambda f: _add(f, "MISSING_AMOUNT_FILLED")
+            )
+            for idx in df.index[fill_mask]:
+                actions.append(_action(df, idx, "MISSING_AMOUNT_FILLED",
+                    f"{col} was missing but the opposite side has a value — "
+                    f"filled {col} with {MISSING_AMOUNT_FILL}"))
         report["missing_amount_filled"] += int(fill_mask.sum())
 
     # ── balance — flag only, never imputed ───────────────────────────────
@@ -191,30 +191,42 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
         else:
             mask = df["balance"].isna()
         report["missing_balance"] = int(mask.sum())
-        for idx in df.index[mask]:
-            df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_BALANCE")
-            actions.append(_action(df, idx, "MISSING_BALANCE",
-                "balance is missing — cannot verify continuity for this row "
-                "or safely use it as the previous-balance anchor for the next row"))
+        if mask.any():
+            # Vectorized (Task 1): bulk flag assignment
+            df.loc[mask, "clean_flags"] = df.loc[mask, "clean_flags"].apply(
+                lambda f: _add(f, "MISSING_BALANCE")
+            )
+            for idx in df.index[mask]:
+                actions.append(_action(df, idx, "MISSING_BALANCE",
+                    "balance is missing — cannot verify continuity for this row "
+                    "or safely use it as the previous-balance anchor for the next row"))
 
     # ── utr_ref — flag only, informational (normal for cash/ATM/cheque) ─
     if "utr_ref" in df.columns:
         mask = _is_blank(df["utr_ref"])
         report["missing_utr"] = int(mask.sum())
-        for idx in df.index[mask]:
-            df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_UTR")
-            actions.append(_action(df, idx, "MISSING_UTR",
-                "utr_ref is empty — expected for cash/ATM/cheque rows, "
-                "informational only"))
+        if mask.any():
+            # Vectorized (Task 1): bulk flag assignment
+            df.loc[mask, "clean_flags"] = df.loc[mask, "clean_flags"].apply(
+                lambda f: _add(f, "MISSING_UTR")
+            )
+            for idx in df.index[mask]:
+                actions.append(_action(df, idx, "MISSING_UTR",
+                    "utr_ref is empty — expected for cash/ATM/cheque rows, "
+                    "informational only"))
 
     # ── time — safe to default to midnight ───────────────────────────────
     if "time" in df.columns:
         mask = _is_blank(df["time"])
-        for idx in df.index[mask]:
-            df.at[idx, "time"] = MISSING_TIME_DEFAULT
-            df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_TIME_DEFAULTED")
-            actions.append(_action(df, idx, "MISSING_TIME_DEFAULTED",
-                f"time was empty — defaulted to {MISSING_TIME_DEFAULT}"))
+        if mask.any():
+            # Vectorized (Task 1): bulk assignment
+            df.loc[mask, "time"] = MISSING_TIME_DEFAULT
+            df.loc[mask, "clean_flags"] = df.loc[mask, "clean_flags"].apply(
+                lambda f: _add(f, "MISSING_TIME_DEFAULTED")
+            )
+            for idx in df.index[mask]:
+                actions.append(_action(df, idx, "MISSING_TIME_DEFAULTED",
+                    f"time was empty — defaulted to {MISSING_TIME_DEFAULT}"))
         report["missing_time_defaulted"] = int(mask.sum())
 
     # Drop the temp masks clean_amounts left behind now that this module

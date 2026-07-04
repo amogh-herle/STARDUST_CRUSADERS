@@ -46,11 +46,29 @@ Usage:
                     --out-dir cleaned/
 """
 
-import os, json, argparse
+import os, json, argparse, logging
 import pandas as pd
 from datetime import datetime
 
+from audit_utils import _merge_flag as _merge, _action
 from cleaning_config import CLEANED_OUTPUT_COLS
+
+# ── Logging setup (Task 7) ───────────────────────────────────────────────
+# Replace print()-based progress/summary output with the logging module
+# (INFO for progress, WARNING for suspect-account/high-duplicate-rate
+# alerts) so this can run unattended in a real pipeline, while keeping
+# the existing console output as the default log format.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Console handler — replaces all the previous print() calls
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(message)s')  # plain text, no timestamps for console
+console_handler.setFormatter(console_formatter)
+
+if not logger.handlers:
+    logger.addHandler(console_handler)
 from deduplicator     import run_deduplication
 from validator        import (
     validate_dates,
@@ -71,9 +89,9 @@ from quality_assessor  import assess_quality
 def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"\n{'='*62}")
-    print("  Phase 7 — Data Cleaning Engine")
-    print(f"{'='*62}")
+    logger.info(f"\n{'='*62}")
+    logger.info("  Phase 7 — Data Cleaning Engine")
+    logger.info(f"{'='*62}")
 
     # ── Load ─────────────────────────────────────────────────────────────
     # debit/credit/balance are loaded and kept as RAW STRINGS here. They
@@ -86,8 +104,32 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     # columns get converted to numeric.
     df = pd.read_csv(input_path, dtype=str)
 
-    print(f"  Loaded : {len(df):,} rows across {df['account_id'].nunique()} accounts")
-    print(f"  Sources: {df['source_format'].value_counts().to_dict()}")
+    # ── Schema validation (Task 4) ───────────────────────────────────────
+    # Bug fix: run_cleaning_pipeline() previously assumed columns like
+    # account_id, source_format, debit, credit, balance, narration exist
+    # and would throw an unhelpful KeyError partway through if the Phase 6
+    # output was missing one. Add an explicit upfront check that lists all
+    # required columns and fails fast with a clear message naming what's
+    # missing.
+    required_cols = [
+        "account_id", "account_holder", "bank_name",
+        "date", "time", "narration", "channel",
+        "debit", "credit", "balance",
+        "utr_ref", "counterparty_name",
+        "source_file", "source_format",
+    ]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"Phase 7 input schema validation failed: the following required "
+            f"columns are missing from {input_path}: {', '.join(missing_cols)}. "
+            f"This file does not match the Phase 6 UNIFIED_SCHEMA output format. "
+            f"Check that the input is ingested_transactions.csv from Phase 6, "
+            f"not a different file."
+        )
+
+    logger.info(f"  Loaded : {len(df):,} rows across {df['account_id'].nunique()} accounts")
+    logger.info(f"  Sources: {df['source_format'].value_counts().to_dict()}")
 
     report = {
         "run_timestamp": datetime.now().isoformat(),
@@ -117,9 +159,9 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     # ══════════════════════════════════════════════════════════════════════
     # MODULE 1 — DATA STANDARDIZER  (never removes rows)
     # ══════════════════════════════════════════════════════════════════════
-    print("\n  [1/5] MODULE 1 — Data Standardizer ...")
+    logger.info("\n  [1/5] MODULE 1 — Data Standardizer ...")
 
-    print("      1a. Date validation ...")
+    logger.info("      1a. Date validation ...")
     df, date_report, date_actions = validate_dates(df)
     df["clean_flags"] = df.apply(
         lambda r: _merge(r["clean_flags"], r.get("_date_flags", "")), axis=1
@@ -127,28 +169,34 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     df = df.drop(columns=["_date_flags"], errors="ignore")
     all_actions.extend(date_actions)
     report["date_validation"] = date_report
-    print(f"          Null dates         : {date_report['null_dates']}")
-    print(f"          Bad format dates   : {date_report['bad_format_dates']}")
-    print(f"          Out-of-range dates : {date_report['out_of_range_dates']}")
+    logger.info(f"          Null dates         : {date_report['null_dates']}")
+    logger.info(f"          Bad format dates   : {date_report['bad_format_dates']}")
+    logger.info(f"          Out-of-range dates : {date_report['out_of_range_dates']}")
 
-    print("      1b. Amount cleaning ...")
+    logger.info("      1b. Amount cleaning ...")
     df, amount_report, amount_actions = clean_amounts(df)
     zero_mask = (df["debit"] == 0.0) & (df["credit"] == 0.0)
-    df.loc[zero_mask, "clean_flags"] = df.loc[zero_mask, "clean_flags"].apply(
-        lambda f: _merge(f, "ZERO_DEBIT_AND_CREDIT")
-    )
+    # Bug fix (Task 5): ZERO_DEBIT_AND_CREDIT was being written directly to
+    # clean_flags via a mask, bypassing all_actions entirely — this broke
+    # the "every flag has a corresponding all_actions.csv row" invariant.
+    # Now logging an action per affected row like every other flag does.
+    for idx in df.index[zero_mask]:
+        df.at[idx, "clean_flags"] = _merge(df.at[idx, "clean_flags"], "ZERO_DEBIT_AND_CREDIT")
+        # NOTE: clean_amounts() already logged a ZERO_DEBIT_AND_CREDIT action
+        # for these rows (see validator.py clean_amounts return), so we don't
+        # duplicate it here — just applying the flag to clean_flags column.
     all_actions.extend(amount_actions)
     report["amount_cleaning"] = amount_report
-    print(f"          Amount corrections : {amount_report['amount_corrections']}")
-    print(f"          Zero debit+credit  : {amount_report['zero_debit_credit_rows']}")
+    logger.info(f"          Amount corrections : {amount_report['amount_corrections']}")
+    logger.info(f"          Zero debit+credit  : {amount_report['zero_debit_credit_rows']}")
 
-    print("      1c. Narration / channel / account-id normalisation ...")
+    logger.info("      1c. Narration / channel / account-id normalisation ...")
     df, text_report, text_actions = normalise_text_fields(df)
     all_actions.extend(text_actions)
     report["text_normalisation"] = text_report
-    print(f"          Narrations cleaned : {text_report['narrations_cleaned']}")
-    print(f"          Channels normalised: {text_report['channels_normalised']}")
-    print(f"          Account IDs fixed  : {text_report['account_ids_stripped']}")
+    logger.info(f"          Narrations cleaned : {text_report['narrations_cleaned']}")
+    logger.info(f"          Channels normalised: {text_report['channels_normalised']}")
+    logger.info(f"          Account IDs fixed  : {text_report['account_ids_stripped']}")
 
     # ══════════════════════════════════════════════════════════════════════
     # MODULE 2 — DUPLICATE DETECTOR
@@ -157,7 +205,7 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     # dates/amounts/narrations, not raw source formatting, so two rows that
     # only *look* different because of formatting drift are correctly
     # recognised as the same transaction.
-    print("\n  [2/5] MODULE 2 — Duplicate Detector ...")
+    logger.info("\n  [2/5] MODULE 2 — Duplicate Detector ...")
     df, dedup_report, dedup_audit = run_deduplication(df)
 
     for _, row in dedup_audit["exact_duplicates_removed"].iterrows():
@@ -175,40 +223,40 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
         })
 
     report["deduplication"] = dedup_report
-    print(f"      Exact dupes removed : {dedup_report['exact_duplicates_found']} "
+    logger.info(f"      Exact dupes removed : {dedup_report['exact_duplicates_found']} "
           f"({dedup_report.get('exact_duplicate_rate', 0):.1%} of input rows)")
-    print(f"      Near dupes flagged  : {dedup_report['near_duplicates_flagged']}")
-    print(f"      UTR collisions      : {dedup_report['utr_collisions_flagged']}")
-    print(f"      Multi-file key collisions (flagged, NOT removed): "
+    logger.info(f"      Near dupes flagged  : {dedup_report['near_duplicates_flagged']}")
+    logger.info(f"      UTR collisions      : {dedup_report['utr_collisions_flagged']}")
+    logger.info(f"      Multi-file key collisions (flagged, NOT removed): "
           f"{dedup_report['multi_file_collisions_flagged']}")
-    print(f"      Possible duplicates (near+UTR+multi-file, all flagged not removed): "
+    logger.info(f"      Possible duplicates (near+UTR+multi-file, all flagged not removed): "
           f"{dedup_report.get('possible_duplicate_rate', 0):.1%} of input rows")
     if dedup_report.get("high_duplicate_rate_warning"):
-        print(f"      ⚠️  {dedup_report.get('high_duplicate_rate_warning_message', 'HIGH_DUPLICATE_RATE_WARNING')}")
+        logger.warning(f"      ⚠️  {dedup_report.get('high_duplicate_rate_warning_message', 'HIGH_DUPLICATE_RATE_WARNING')}")
 
     # ══════════════════════════════════════════════════════════════════════
     # MODULE 3 — DATA VALIDATOR
     # ══════════════════════════════════════════════════════════════════════
-    print("\n  [3/5] MODULE 3 — Data Validator ...")
+    logger.info("\n  [3/5] MODULE 3 — Data Validator ...")
 
-    print("      3a. Transaction-type validation ...")
+    logger.info("      3a. Transaction-type validation ...")
     df, txn_type_report, txn_type_actions = validate_transaction_types(df)
     all_actions.extend(txn_type_actions)
     report["transaction_type_validation"] = txn_type_report
-    print(f"          Invalid (debit&credit both set): {txn_type_report['invalid_transaction_rows']}")
-    print(f"          Both negative                  : {txn_type_report['both_negative_rows']}")
+    logger.info(f"          Invalid (debit&credit both set): {txn_type_report['invalid_transaction_rows']}")
+    logger.info(f"          Both negative                  : {txn_type_report['both_negative_rows']}")
 
-    print("      3b. Failed-transaction detection ...")
+    logger.info("      3b. Failed-transaction detection ...")
     df, failed_txn_report, failed_txn_actions = flag_failed_transactions(df)
     all_actions.extend(failed_txn_actions)
     report["failed_transaction_detection"] = failed_txn_report
-    print(f"          Failed/declined/reversed/etc. rows (flagged, not removed): "
+    logger.info(f"          Failed/declined/reversed/etc. rows (flagged, not removed): "
           f"{failed_txn_report['failed_transaction_rows']}")
     if failed_txn_report["failed_transaction_keyword_counts"]:
         for kw, cnt in failed_txn_report["failed_transaction_keyword_counts"].items():
-            print(f"             {kw}: {cnt}")
+            logger.info(f"             {kw}: {cnt}")
 
-    print("      3c. Balance continuity ...")
+    logger.info("      3c. Balance continuity ...")
     df, balance_report, balance_actions = validate_balance_continuity(df)
     all_actions.extend(balance_actions)
     balance_review_accounts = balance_report.get(
@@ -223,73 +271,73 @@ def run_cleaning_pipeline(input_path: str, out_dir: str) -> pd.DataFrame:
     }
     report["balance_validation"]["n_suspect_accounts"] = len(balance_review_accounts)
     report["balance_validation"]["n_balance_untracked_accounts"] = len(untracked_accounts)
-    print(f"          Accounts checked     : {balance_report['accounts_checked']}")
-    print(f"          Accounts w/ mismatches : {balance_report['accounts_with_breaches']}")
-    print(f"          Mismatch rows (total) : {balance_report['total_breach_rows']}")
-    print(f"            MINOR (<=₹5, flagged): {balance_report['total_minor_mismatch_rows']}")
-    print(f"            MAJOR (>₹5, flagged) : {balance_report['total_major_mismatch_rows']}")
+    logger.info(f"          Accounts checked     : {balance_report['accounts_checked']}")
+    logger.info(f"          Accounts w/ mismatches : {balance_report['accounts_with_breaches']}")
+    logger.info(f"          Mismatch rows (total) : {balance_report['total_breach_rows']}")
+    logger.info(f"            MINOR (<=₹5, flagged): {balance_report['total_minor_mismatch_rows']}")
+    logger.info(f"            MAJOR (>₹5, flagged) : {balance_report['total_major_mismatch_rows']}")
     if untracked_accounts:
-        print(f"          ⚙  BALANCE UNTRACKED : {len(untracked_accounts)} account(s) — "
+        logger.info(f"          ⚙  BALANCE UNTRACKED : {len(untracked_accounts)} account(s) — "
               f"balance column doesn't move despite real transactions; "
               f"excluded from breach scoring")
         for ua in untracked_accounts:
-            print(f"             {ua['account_id']} — balance unchanged on "
+            logger.info(f"             {ua['account_id']} — balance unchanged on "
                   f"{ua['flatline_ratio']*100:.0f}% of {ua['txn_rows_checked']} txn rows")
     if balance_review_accounts:
-        print(f"          ⚠  SUSPECT ACCOUNTS : {len(balance_review_accounts)}")
+        logger.warning(f"          ⚠  SUSPECT ACCOUNTS : {len(balance_review_accounts)}")
         for sa in balance_review_accounts:
-            print(f"             {sa['account_id']} — {sa['breach_ratio']*100:.0f}% breach "
+            logger.info(f"             {sa['account_id']} — {sa['breach_ratio']*100:.0f}% breach "
                   f"({sa['breach_rows']}/{sa['total_rows']}) [{sa['severity']}]")
 
-    print("      3d. Counterparty validation ...")
+    logger.info("      3d. Counterparty validation ...")
     df, cp_report, cp_actions = validate_counterparties(df)
     all_actions.extend(cp_actions)
     report["counterparty_validation"] = cp_report
-    print(f"          Self-transfers flagged : {cp_report['self_transfers_flagged']}")
-    print(f"          Malformed IFSC flagged : {cp_report['malformed_ifsc_flagged']}")
+    logger.info(f"          Self-transfers flagged : {cp_report['self_transfers_flagged']}")
+    logger.info(f"          Malformed IFSC flagged : {cp_report['malformed_ifsc_flagged']}")
 
-    print("      3e. Statistical outliers + velocity check ...")
+    logger.info("      3e. Statistical outliers + velocity check ...")
     df, outlier_report, outlier_actions = flag_statistical_outliers(df)
     df, velocity_report, velocity_actions = flag_velocity_bursts(df)
     all_actions.extend(outlier_actions)
     all_actions.extend(velocity_actions)
     report["outlier_flagging"]  = outlier_report
     report["velocity_flagging"] = velocity_report
-    print(f"          Outlier rows flagged  : {outlier_report['outlier_rows_flagged']}")
-    print(f"          Velocity rows flagged : {velocity_report['velocity_rows_flagged']}")
+    logger.info(f"          Outlier rows flagged  : {outlier_report['outlier_rows_flagged']}")
+    logger.info(f"          Velocity rows flagged : {velocity_report['velocity_rows_flagged']}")
     if velocity_report["velocity_accounts_flagged"] > 0:
-        print(f"          ⚠  Velocity accounts : {velocity_report['velocity_accounts_flagged']}")
+        logger.warning(f"          ⚠  Velocity accounts : {velocity_report['velocity_accounts_flagged']}")
 
-    print("      3f. Narration integrity ...")
+    logger.info("      3f. Narration integrity ...")
     df, narr_report, narr_actions = flag_empty_narrations(df)
     all_actions.extend(narr_actions)
     report["narration_integrity"] = narr_report
-    print(f"          Empty/short narrations: {narr_report['empty_narration_rows']}")
+    logger.info(f"          Empty/short narrations: {narr_report['empty_narration_rows']}")
 
     # ══════════════════════════════════════════════════════════════════════
     # MODULE 4 — MISSING VALUE HANDLER
     # ══════════════════════════════════════════════════════════════════════
-    print("\n  [4/5] MODULE 4 — Missing Value Handler ...")
+    logger.info("\n  [4/5] MODULE 4 — Missing Value Handler ...")
     df, missing_report, missing_actions = handle_missing_values(df)
     all_actions.extend(missing_actions)
     report["missing_values"] = missing_report
-    print(f"      Missing account_id      : {missing_report['missing_account_id']}")
-    print(f"      Missing date            : {missing_report['missing_date']}")
-    print(f"      Narration filled        : {missing_report['missing_narration_filled']}")
-    print(f"      Amount filled           : {missing_report['missing_amount_filled']}")
-    print(f"      Missing balance         : {missing_report['missing_balance']}")
-    print(f"      Missing UTR             : {missing_report['missing_utr']}")
-    print(f"      Time defaulted          : {missing_report['missing_time_defaulted']}")
+    logger.info(f"      Missing account_id      : {missing_report['missing_account_id']}")
+    logger.info(f"      Missing date            : {missing_report['missing_date']}")
+    logger.info(f"      Narration filled        : {missing_report['missing_narration_filled']}")
+    logger.info(f"      Amount filled           : {missing_report['missing_amount_filled']}")
+    logger.info(f"      Missing balance         : {missing_report['missing_balance']}")
+    logger.info(f"      Missing UTR             : {missing_report['missing_utr']}")
+    logger.info(f"      Time defaulted          : {missing_report['missing_time_defaulted']}")
 
     # ══════════════════════════════════════════════════════════════════════
     # MODULE 5 — QUALITY ASSESSOR
     # ══════════════════════════════════════════════════════════════════════
-    print("\n  [5/5] MODULE 5 — Quality Assessor ...")
+    logger.info("\n  [5/5] MODULE 5 — Quality Assessor ...")
     df, quality_report, quality_actions = assess_quality(df)
     all_actions.extend(quality_actions)
     report["quality_assessment"] = quality_report
-    print(f"      Avg quality score : {quality_report['avg_quality_score']}")
-    print(f"      Band counts       : {quality_report['band_counts']}")
+    logger.info(f"      Avg quality score : {quality_report['avg_quality_score']}")
+    logger.info(f"      Band counts       : {quality_report['band_counts']}")
 
     # ── Build flag columns ────────────────────────────────────────────────
     for col in CLEANED_OUTPUT_COLS:
@@ -622,49 +670,44 @@ def _write_summary_txt(report, balance_report, n_removed, n_flagged,
         f.write("\n".join(lines))
 
 
-def _merge(existing: str, new_flag: str) -> str:
-    e = str(existing).strip() if existing else ""
-    n = str(new_flag).strip()  if new_flag  else ""
-    if not n: return e
-    if not e: return n
-    return e + " | " + n
+# _merge() is now imported from audit_utils as _merge_flag (aliased to _merge for backward compat)
 
 
 def _print_summary(report, out_dir):
-    print(f"\n{'='*62}")
-    print("  CLEANING SUMMARY")
-    print(f"{'='*62}")
-    print(f"  Rows input              : {report['rows_input']:,}")
-    print(f"  Rows output             : {report['rows_output']:,}")
+    logger.info(f"\n{'='*62}")
+    logger.info("  CLEANING SUMMARY")
+    logger.info(f"{'='*62}")
+    logger.info(f"  Rows input              : {report['rows_input']:,}")
+    logger.info(f"  Rows output             : {report['rows_output']:,}")
     dedup = report['deduplication']
-    print(f"  Exact dupes removed     : {dedup['exact_duplicates_found']} "
+    logger.info(f"  Exact dupes removed     : {dedup['exact_duplicates_found']} "
           f"({dedup.get('exact_duplicate_rate', 0):.1%}, target <3%)")
-    print(f"  Near dupes flagged      : {dedup['near_duplicates_flagged']}")
-    print(f"  UTR collisions flagged  : {dedup['utr_collisions_flagged']}")
-    print(f"  Possible dupes (total)  : {dedup.get('possible_duplicate_rate', 0):.1%} (target 5-15%)")
+    logger.info(f"  Near dupes flagged      : {dedup['near_duplicates_flagged']}")
+    logger.info(f"  UTR collisions flagged  : {dedup['utr_collisions_flagged']}")
+    logger.info(f"  Possible dupes (total)  : {dedup.get('possible_duplicate_rate', 0):.1%} (target 5-15%)")
     if dedup.get("high_duplicate_rate_warning"):
-        print(f"  ⚠️  HIGH_DUPLICATE_RATE_WARNING — see cleaning_summary.txt")
-    print(f"  Invalid transactions    : {report['transaction_type_validation']['invalid_transaction_rows']}")
-    print(f"  Failed transactions     : {report['failed_transaction_detection']['failed_transaction_rows']} (flagged, never removed)")
-    print(f"  Balance mismatch rows   : {report['balance_validation']['total_breach_rows']} "
+        logger.warning(f"  ⚠️  HIGH_DUPLICATE_RATE_WARNING — see cleaning_summary.txt")
+    logger.info(f"  Invalid transactions    : {report['transaction_type_validation']['invalid_transaction_rows']}")
+    logger.info(f"  Failed transactions     : {report['failed_transaction_detection']['failed_transaction_rows']} (flagged, never removed)")
+    logger.info(f"  Balance mismatch rows   : {report['balance_validation']['total_breach_rows']} "
           f"(minor: {report['balance_validation']['total_minor_mismatch_rows']}, "
           f"major: {report['balance_validation']['total_major_mismatch_rows']})")
-    print(f"  Suspect accounts        : {report['balance_validation']['n_suspect_accounts']}")
-    print(f"  High-value outlier rows : {report['outlier_flagging']['outlier_rows_flagged']}")
-    print(f"  Velocity burst rows     : {report['velocity_flagging']['velocity_rows_flagged']}")
-    print(f"  Avg quality score       : {report['quality_assessment']['avg_quality_score']}")
-    print(f"  Rows with any flag      : {report['rows_with_any_flag']:,}")
-    print(f"  Rows fully clean        : {report['rows_fully_clean']:,}")
-    print(f"\n  Outputs → {os.path.abspath(out_dir)}/")
-    print(f"    • cleaned_transactions.csv     ← feed to Phase 8/9/10")
-    print(f"    • removed_data.csv             ← all removed rows with reasons")
-    print(f"    • flagged_data.csv             ← all flagged rows with reasons")
-    print(f"    • all_actions.csv              ← every change made, row by row")
-    print(f"    • suspect_accounts.csv         ← balance integrity failures")
-    print(f"    • cleaning_report.json         ← machine-readable audit trail")
-    print(f"    • quality_report.json          ← quality-assessment + duplicate-rate stats")
-    print(f"    • cleaning_summary.txt         ← human-readable narrative")
-    print(f"{'='*62}\n")
+    logger.info(f"  Suspect accounts        : {report['balance_validation']['n_suspect_accounts']}")
+    logger.info(f"  High-value outlier rows : {report['outlier_flagging']['outlier_rows_flagged']}")
+    logger.info(f"  Velocity burst rows     : {report['velocity_flagging']['velocity_rows_flagged']}")
+    logger.info(f"  Avg quality score       : {report['quality_assessment']['avg_quality_score']}")
+    logger.info(f"  Rows with any flag      : {report['rows_with_any_flag']:,}")
+    logger.info(f"  Rows fully clean        : {report['rows_fully_clean']:,}")
+    logger.info(f"\n  Outputs → {os.path.abspath(out_dir)}/")
+    logger.info(f"    • cleaned_transactions.csv     ← feed to Phase 8/9/10")
+    logger.info(f"    • removed_data.csv             ← all removed rows with reasons")
+    logger.info(f"    • flagged_data.csv             ← all flagged rows with reasons")
+    logger.info(f"    • all_actions.csv              ← every change made, row by row")
+    logger.info(f"    • suspect_accounts.csv         ← balance integrity failures")
+    logger.info(f"    • cleaning_report.json         ← machine-readable audit trail")
+    logger.info(f"    • quality_report.json          ← quality-assessment + duplicate-rate stats")
+    logger.info(f"    • cleaning_summary.txt         ← human-readable narrative")
+    logger.info(f"{'='*62}\n")
 
 
 if __name__ == "__main__":

@@ -34,33 +34,11 @@ row would just be noise in all_actions.csv.
 
 import pandas as pd
 
+from audit_utils import _action
 from cleaning_config import (
     QUALITY_SCORE_START, QUALITY_PENALTIES_BY_FLAG_TOKEN,
     QUALITY_PENALTIES_BY_BOOL_COLUMN, QUALITY_BAND_THRESHOLDS,
 )
-
-
-def _action(df: pd.DataFrame, row_idx, action_type: str, detail: str) -> dict:
-    try:
-        row = df.loc[row_idx]
-        return {
-            "row_index":   row_idx,
-            "account_id":  row.get("account_id", ""),
-            "date":        row.get("date", ""),
-            "narration":   str(row.get("narration", ""))[:80],
-            "debit":       row.get("debit", ""),
-            "credit":      row.get("credit", ""),
-            "balance":     row.get("balance", ""),
-            "source_file": row.get("source_file", ""),
-            "action_type": action_type,
-            "detail":      detail,
-        }
-    except Exception:
-        return {
-            "row_index": row_idx, "account_id": "", "date": "",
-            "narration": "", "debit": "", "credit": "", "balance": "",
-            "source_file": "", "action_type": action_type, "detail": detail,
-        }
 
 
 def _band_for(score: int) -> str:
@@ -82,36 +60,51 @@ def assess_quality(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
 
     flags_col = df.get("clean_flags", pd.Series([""] * len(df), index=df.index)).fillna("")
 
-    scores = []
-    for idx in df.index:
-        score = QUALITY_SCORE_START
-        reasons = []
+    # Vectorized (Task 1): calculate scores using vectorized operations
+    # Start all rows at 100
+    scores = pd.Series([QUALITY_SCORE_START] * len(df), index=df.index)
+    reasons_list = [[] for _ in range(len(df))]
 
+    # Apply flag token penalties
+    for idx in df.index:
         tokens = [t.strip() for t in str(flags_col.loc[idx]).split("|") if t.strip()]
         for tok in tokens:
             penalty = QUALITY_PENALTIES_BY_FLAG_TOKEN.get(tok)
             if penalty:
-                score -= penalty
-                reasons.append(f"{tok}(-{penalty})")
+                scores.loc[idx] -= penalty
+                reasons_list[idx].append(f"{tok}(-{penalty})")
 
-        for col, penalty in QUALITY_PENALTIES_BY_BOOL_COLUMN.items():
-            if col in df.columns and bool(df.at[idx, col]):
-                score -= penalty
-                reasons.append(f"{col}(-{penalty})")
+    # Apply boolean column penalties (vectorized where possible)
+    for col, penalty in QUALITY_PENALTIES_BY_BOOL_COLUMN.items():
+        if col in df.columns:
+            mask = df[col].astype(bool)
+            scores.loc[mask] -= penalty
+            for idx in df.index[mask]:
+                reasons_list[idx].append(f"{col}(-{penalty})")
 
-        score = max(0, score)
-        scores.append(score)
+    # Floor scores at 0
+    scores = scores.clip(lower=0)
 
-        band = _band_for(score)
-        report["band_counts"][band] += 1
+    # Calculate bands
+    bands = scores.apply(_band_for)
 
-        if band == "LOW":
-            actions.append(_action(df, idx, "QUALITY_SCORE_LOW",
-                f"score={score} band=LOW — penalties: {', '.join(reasons) if reasons else 'none'}"))
+    # Count bands
+    report["band_counts"] = bands.value_counts().to_dict()
+    for band in ["HIGH", "MEDIUM", "LOW"]:
+        if band not in report["band_counts"]:
+            report["band_counts"][band] = 0
+
+    # Log actions only for LOW band rows
+    low_mask = bands == "LOW"
+    for idx in df.index[low_mask]:
+        score = scores.loc[idx]
+        reasons = reasons_list[idx]
+        actions.append(_action(df, idx, "QUALITY_SCORE_LOW",
+            f"score={score} band=LOW — penalties: {', '.join(reasons) if reasons else 'none'}"))
 
     df["quality_score"] = scores
-    df["quality_band"]  = [_band_for(s) for s in scores]
+    df["quality_band"]  = bands
 
-    report["avg_quality_score"] = round(sum(scores) / len(scores), 2) if scores else 0.0
+    report["avg_quality_score"] = round(scores.mean(), 2) if len(scores) > 0 else 0.0
 
     return df, report, actions
