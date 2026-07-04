@@ -86,14 +86,16 @@ def lookup_bank_via_ifsc(ifsc_code: str, timeout: float = 3.0) -> str | None:
 
 
 def extract_account_ifsc(text: str) -> str:
-    """Pull the statement's OWN IFSC from an anchored label."""
+    """Pull the statement's OWN IFSC from an anchored label.
+    Accepts both 'IFSC' and the shorter 'IFS Code' label some banks use
+    (e.g. SBI statements print 'IFS Code : SBIN0007550', not 'IFSC')."""
     if not text:
         return ""
     m = re.search(
-        r"IFSC\s*(?:Code|/RTGS/NEFT)?\s*[:\-]?\s*([A-Za-z]{4}0[A-Za-z0-9]{6})",
+        r"IFS\s*C?(?:ode)?(?:/RTGS/NEFT)?\s*[:\-]?\s*([A-Za-z]{4})[0O9](?:[A-Za-z0-9]{6})",
         text, re.IGNORECASE
     )
-    return m.group(1).upper() if m else ""
+    return (m.group(1) + "0" + m.group(2)).upper() if m else ""
 
 
 def detect_bank(text: str) -> tuple[str, str]:

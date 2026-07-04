@@ -1,0 +1,7 @@
+account_id,account_holder,bank_name,date,time,narration,channel,debit,credit,balance,utr_ref,counterparty_name,counterparty_account,counterparty_ifsc,source_file,source_format,ingestion_warnings
+image,Person 1,Airtel Payments Bank,2020-05-07,00:00:00,07-05-,OTHER,925.0,0.0,701350.0,,,,,image.png,image,
+image,Person 1,Airtel Payments Bank,2025-05-15,00:00:00,+ OTHER MISC.,OTHER,177.0,0.0,701173.0,,,,,image.png,image,
+image,Person 1,Airtel Payments Bank,2025-07-08,00:00:00,SELF AT 07550 |,OTHER,50000.0,0.0,555909.0,,,,,image.png,image,
+image,Person 1,Airtel Payments Bank,2025-07-11,00:00:00,SELF AT 07550,OTHER,50000.0,0.0,505909.0,,,,,image.png,image,
+image,Person 1,Airtel Payments Bank,2025-07-12,00:00:00,PT,OTHER,800.0,0.0,506709.0,,,,,image.png,image,
+image,Person 1,Airtel Payments Bank,2025-08-21,00:00:00,21-08-,OTHER,3000.0,0.0,510909.0,,,,,image.png,image,
