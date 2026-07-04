@@ -67,8 +67,15 @@ class FeatureEngineer:
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Transform NEW/unseen data using the FROZEN statistics from fit_transform().
-        Unseen accounts fall back to population-average statistics rather than
-        being computed from their own (possibly tiny / skewed) data.
+
+        For accounts that WERE in the training set, frozen stats are reused (no leakage).
+        For accounts that are NEW/UNSEEN (e.g. a fresh upload at inference time), their
+        own stats are computed directly from the rows present in this dataframe — because
+        using the population-average fallback for a single-account file would make every
+        feature meaningless (all z-scores collapse to ~0, model goes blind).
+
+        The fallback population-average is only used when an unseen account has too few
+        rows (<5) to compute reliable per-account stats.
         """
         if not self.fitted_:
             raise RuntimeError("Call fit_transform() on training data before transform().")
@@ -76,6 +83,15 @@ class FeatureEngineer:
         df = df.copy()
         df = self._f1_amount(df)
         df = self._f2_temporal(df)
+
+        # ── Compute live stats for genuinely unseen accounts ─────────────────
+        unseen = set(df["account_id"]) - set(self.account_stats_.index)
+        if unseen:
+            if self.verbose:
+                print(f"[FeatureEngineer] {len(unseen)} unseen account(s) — "
+                      f"computing stats from their own rows in this file.")
+            self._inject_unseen_account_stats(df, unseen)
+
         df = self._apply_account_profile(df)
         df = self._f4_velocity(df)
         df = self._f5_counterparty(df, fit=False)
@@ -83,12 +99,52 @@ class FeatureEngineer:
         df = self._apply_balance_features(df, fit=False)
         df = self._f8_structuring(df, fit=False)
 
-        if self.verbose:
-            unseen = set(df["account_id"]) - set(self.account_stats_.index)
-            if unseen:
-                print(f"[FeatureEngineer] {len(unseen)} unseen account(s) — "
-                      f"using population-average fallback stats for them.")
         return df
+
+    def _inject_unseen_account_stats(self, df: pd.DataFrame, unseen_ids: set):
+        """
+        For each unseen account, compute per-account stats from the rows in df
+        and add them into self.account_stats_ so _apply_account_profile() picks
+        them up via the normal merge path.
+
+        Accounts with fewer than MIN_ROWS rows fall back to the population average
+        (too little data to compute meaningful own stats).
+        """
+        MIN_ROWS = 5
+        sub = df[df["account_id"].isin(unseen_ids)].copy()
+
+        for acc_id, grp in sub.groupby("account_id"):
+            if len(grp) < MIN_ROWS:
+                # Too few rows — use population-average fallback for this account
+                row = self.fallback_account_stats_.copy()
+            else:
+                active_days = max(1, (grp["datetime"].max() - grp["datetime"].min()).days)
+                amt = grp["abs_amount"]
+                bal = grp["balance"]
+
+                row = pd.Series({
+                    "acc_avg_amount":         float(amt.mean()),
+                    "acc_std_amount":         float(amt.std()) if len(grp) > 1 else float(amt.mean() * 0.1),
+                    "acc_median_amount":      float(amt.median()),
+                    "acc_max_amount":         float(amt.max()),
+                    "acc_txn_count":          len(grp),
+                    "acc_credit_ratio":       float(grp["is_credit"].mean()),
+                    "acc_active_days":        float(active_days),
+                    "acc_round_number_ratio": float((amt % 1000 == 0).mean()),
+                    "acc_night_txn_ratio":    float(grp["is_night"].mean()),
+                    "acc_rapid_transfer_ratio": float(grp["rapid_transfer_flag"].mean()),
+                    "n_unique_counterparties": float(
+                        grp["counterparty_account"].nunique()
+                        if "counterparty_account" in grp.columns else 0
+                    ),
+                    "acc_debit_ratio":        float(1 - grp["is_credit"].mean()),
+                    "acc_txns_per_day":       float(len(grp) / (active_days + 1)),
+                    "_bal_mean":              float(bal.mean()),
+                    "_bal_std":               float(bal.std()) if len(grp) > 1 else float(bal.mean() * 0.1 + 1),
+                })
+
+            # Append to the frozen account_stats_ so the merge finds it
+            self.account_stats_.loc[acc_id] = row
 
     @staticmethod
     def feature_columns() -> list:

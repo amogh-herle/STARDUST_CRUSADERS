@@ -91,6 +91,13 @@ data
 *.png
 *.jpg
 *.jpeg
+*.pdf
+*.csv
+*.xlsx
+*.xls
+*.txt
+*.zip
+
 
 # EXCEPT documentation images
 !docs/**/*.png

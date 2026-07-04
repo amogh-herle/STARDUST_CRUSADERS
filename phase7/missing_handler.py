@@ -23,13 +23,21 @@ whether a field can be safely imputed:
                     for the row after it too. Flagged MISSING_BALANCE.
 
   SAFE IMPUTATION — value filled, original preserved in the action log:
-    narration    — filled with MISSING_NARRATION_FILL, flagged
-                    MISSING_NARRATION_FILLED.
+    narration    — filled with MISSING_NARRATION_FILL (an actual NULL/empty
+                    value per the revised spec, not a text placeholder),
+                    flagged MISSING_NARRATION_FILLED.
     debit/credit — filled with MISSING_AMOUNT_FILL (0.0), flagged
-                    MISSING_AMOUNT_FILLED. A genuinely missing amount cell
-                    (as opposed to one that parsed to 0 from "-" or "Nil")
-                    is functionally the same as "no movement recorded on
-                    this side" for continuity purposes.
+                    MISSING_AMOUNT_FILLED — but ONLY when the OPPOSITE side
+                    of the same row has a real (non-missing) value. A
+                    genuinely missing amount cell where the opposite side
+                    is populated (as opposed to one that parsed to 0 from
+                    "-" or "Nil") is functionally the same as "no movement
+                    recorded on this side" for continuity purposes. If BOTH
+                    debit and credit are missing on the same row, neither
+                    is auto-filled — that's a worse problem (e.g. a
+                    mis-mapped amount column), flagged BOTH_AMOUNTS_MISSING
+                    instead, per the same "don't guess" principle as
+                    account_id/date/balance.
     time         — filled with MISSING_TIME_DEFAULT ("00:00:00"), flagged
                     MISSING_TIME_DEFAULTED. This matches the existing
                     assumption elsewhere in the codebase that a missing
@@ -92,6 +100,7 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
         "missing_date":              0,
         "missing_narration_filled":  0,
         "missing_amount_filled":     0,
+        "both_amounts_missing":      0,
         "missing_balance":           0,
         "missing_utr":               0,
         "missing_time_defaulted":    0,
@@ -114,7 +123,7 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     if "date" in df.columns:
         report["missing_date"] = int(_is_blank(df["date"]).sum())
 
-    # ── narration — safe to fill with a placeholder ─────────────────────
+    # ── narration — safe to fill with NULL (spec: not a text placeholder) ──
     if "narration" in df.columns:
         mask = _is_blank(df["narration"])
         for idx in df.index[mask]:
@@ -122,8 +131,8 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
             df.at[idx, "narration"] = MISSING_NARRATION_FILL
             df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_NARRATION_FILLED")
             actions.append(_action(df, idx, "MISSING_NARRATION_FILLED",
-                f"narration was empty ('{original}') — filled with "
-                f"'{MISSING_NARRATION_FILL}'"))
+                f"narration was empty ('{original}') — left NULL "
+                f"(flagged, not fabricated with a placeholder string)"))
         report["missing_narration_filled"] = int(mask.sum())
 
     # ── debit / credit — safe to fill with 0.0 ──────────────────────────
@@ -134,20 +143,43 @@ def handle_missing_values(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     # of actual data). Use the `_missing_<col>` mask clean_amounts leaves
     # behind (captured before it overwrote the value) instead, falling
     # back to `.isna()` only if that mask isn't present.
-    for col in ("debit", "credit"):
+    # Bug fix (revised-spec compliance): only auto-fill a missing debit/
+    # credit with 0 when the OPPOSITE side of the same row has a real,
+    # non-missing value — i.e. the row is clearly a one-sided movement.
+    # If BOTH sides are missing on the same row, filling both with 0 would
+    # silently manufacture a fake "zero-value transaction" out of a row
+    # that may simply have its amount column mis-mapped — that's flagged
+    # instead, following the same "never guess" principle as account_id/
+    # date/balance.
+    debit_missing_mask  = (df.get("_missing_debit")  if "_missing_debit"  in df.columns
+                            else pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    credit_missing_mask = (df.get("_missing_credit") if "_missing_credit" in df.columns
+                            else pd.Series(False, index=df.index)).fillna(False).astype(bool)
+
+    both_missing_mask = debit_missing_mask & credit_missing_mask
+    report["both_amounts_missing"] = int(both_missing_mask.sum())
+    for idx in df.index[both_missing_mask]:
+        df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "BOTH_AMOUNTS_MISSING")
+        actions.append(_action(df, idx, "BOTH_AMOUNTS_MISSING",
+            "Both debit AND credit are missing on this row — not auto-filled "
+            "(likely a mis-mapped amount column); flagged for investigator review"))
+
+    for col, missing_mask, opposite_missing_mask in (
+        ("debit",  debit_missing_mask,  credit_missing_mask),
+        ("credit", credit_missing_mask, debit_missing_mask),
+    ):
         if col not in df.columns:
             continue
-        missing_col = f"_missing_{col}"
-        if missing_col in df.columns:
-            mask = df[missing_col].fillna(False).astype(bool)
-        else:
-            mask = df[col].isna()
-        for idx in df.index[mask]:
+        # Safe to fill only when this side is missing AND the opposite
+        # side is NOT missing (i.e. genuinely a one-sided row).
+        fill_mask = missing_mask & ~opposite_missing_mask
+        for idx in df.index[fill_mask]:
             df.at[idx, col] = MISSING_AMOUNT_FILL
             df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "MISSING_AMOUNT_FILLED")
             actions.append(_action(df, idx, "MISSING_AMOUNT_FILLED",
-                f"{col} was missing — filled with {MISSING_AMOUNT_FILL}"))
-        report["missing_amount_filled"] += int(mask.sum())
+                f"{col} was missing but the opposite side has a value — "
+                f"filled {col} with {MISSING_AMOUNT_FILL}"))
+        report["missing_amount_filled"] += int(fill_mask.sum())
 
     # ── balance — flag only, never imputed ───────────────────────────────
     # Same bug fix as debit/credit above: balance is also coerced to 0.0

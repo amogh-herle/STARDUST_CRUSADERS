@@ -54,6 +54,40 @@ UTR_DEDUP_ENABLED = True   # flag (not drop) rows sharing a UTR/ref across files
 # transactions again (the original bug).
 EXACT_DEDUP_SAME_FILE_MAX_GAP = 10
 
+# Bug fix (revised-spec compliance): the exact-duplicate key must also
+# require the UTR/reference number to match WHEN ONE IS PRESENT. Two rows
+# that agree on account+date+narration+amounts+balance but carry two
+# DIFFERENT real UTRs are two distinct transactions (e.g. a templated bulk
+# narration), not a re-upload — auto-removing them would destroy evidence.
+# When neither row has a UTR, the condition is vacuously satisfied (no
+# reference exists on either side to disagree), so cash/ATM/cheque rows
+# with no reference number are unaffected. Implemented in deduplicator.py
+# as an additional bucket on the groupby key: rows are only grouped
+# together if their UTR bucket (blank, or the literal UTR value) matches.
+EXACT_DEDUP_REQUIRE_UTR_MATCH = True
+
+# Near-duplicate candidates (same account/date/amounts, narration differs)
+# are only flagged as POSSIBLE_DUPLICATE when the narration similarity
+# ratio is at least this high. This keeps the near-dup detector from
+# flagging two genuinely different transactions that merely happen to
+# share an account/date/amount (common in normal banking — Rule 2: same
+# amount/date alone is never evidence of duplication).
+NEAR_DUP_NARRATION_SIMILARITY_THRESHOLD = 0.95
+
+# ---------------------------------------------------------------------------
+# Duplicate-rate guardrail (revised-spec compliance)
+# ---------------------------------------------------------------------------
+# Phase 7 is a forensic evidence-preservation module, not a maximal-removal
+# engine. These are the expected operating bounds; if EXACT removal alone
+# exceeds the warning threshold, something is almost certainly wrong with
+# the dedup key or the input (e.g. a mis-mapped column collapsing distinct
+# accounts together) — the engine raises a loud, logged warning rather than
+# silently deleting a large fraction of the evidence.
+EXACT_DUP_TARGET_MAX_RATE          = 0.03   # expected/target: <3% of rows
+POSSIBLE_DUP_TARGET_MIN_RATE       = 0.05   # expected: 5–15% flagged
+POSSIBLE_DUP_TARGET_MAX_RATE       = 0.15
+HIGH_DUPLICATE_RATE_WARNING_THRESHOLD = 0.05   # >5% exact removal → warn
+
 # ---------------------------------------------------------------------------
 # Date validation — accepts multiple formats defensively even though
 # Phase 6 v2 normalizer should already emit YYYY-MM-DD
@@ -92,8 +126,16 @@ LAKH_CRORE_MULTIPLIERS = {
 # ---------------------------------------------------------------------------
 # Balance continuity
 # ---------------------------------------------------------------------------
-BALANCE_TOLERANCE                      = 1.0    # ₹1 rounding allowance
-BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD  = 0.05   # flag account if >5% rows breach
+# Revised-spec compliance: balance rows are NEVER removed, only flagged, and
+# flagged into exactly two severities based on the reconciliation gap:
+#   diff <= BALANCE_MISMATCH_MINOR_MAX  → BALANCE_MISMATCH_MINOR
+#   diff >  BALANCE_MISMATCH_MINOR_MAX  → BALANCE_MISMATCH_MAJOR
+# BALANCE_TOLERANCE is kept only as a floating-point epsilon (bank exports
+# round to the paisa; without some epsilon a diff of 0.0000000001 from
+# float arithmetic would spuriously flag as MINOR on every single row).
+BALANCE_TOLERANCE                      = 0.01   # float rounding epsilon only
+BALANCE_MISMATCH_MINOR_MAX             = 5.0    # ₹5 — spec's minor/major cutoff
+BALANCE_BREACH_ACCOUNT_FLAG_THRESHOLD  = 0.05   # flag account if >5% rows MAJOR-breach
 
 # An account whose balance never moves despite real debit/credit movement
 # almost certainly means the source never populated a real running balance
@@ -117,6 +159,19 @@ OUTLIER_MIN_TXN_COUNT    = 10     # minimum rows before IQR is computed
 VELOCITY_WINDOW_MINUTES  = 30      # check for N+ debits within this window
 VELOCITY_MIN_TXNS        = 3       # minimum txns in window to flag
 VELOCITY_MIN_AMOUNT      = 0       # minimum amount per txn (0 = any amount)
+
+# ---------------------------------------------------------------------------
+# Failed-transaction detection (new — revised-spec compliance)
+# ---------------------------------------------------------------------------
+# Rows whose narration/channel/status indicates the transaction never
+# actually settled. These carry real forensic signal (an attempted
+# transfer is still evidence) and are FLAGGED ONLY — never deleted.
+# Matched as whole words against the (already upper-cased, normalised)
+# narration, channel, and a "status" column if the source provided one.
+FLAG_FAILED_TRANSACTIONS = True
+FAILED_TXN_KEYWORDS = [
+    "FAILED", "DECLINED", "TIMEOUT", "REVERSED", "CANCELLED", "ROLLBACK",
+]
 
 # ---------------------------------------------------------------------------
 # Counterparty validation (new — leverages Phase 6 v2's counterparty cols)
@@ -159,8 +214,20 @@ FLAG_BOTH_NEGATIVE         = True   # debit<0 AND credit<0 on one row → BOTH_N
 # Missing-value handling (Module 4)
 # ---------------------------------------------------------------------------
 MISSING_TIME_DEFAULT          = "00:00:00"
-MISSING_NARRATION_FILL        = "UNKNOWN NARRATION"
+# Revised-spec compliance: missing narration is filled with NULL (an
+# actual empty value), not a text placeholder — a fabricated-looking
+# string like "UNKNOWN NARRATION" reads as source data to anyone scanning
+# the CSV later, whereas an empty cell + the MISSING_NARRATION_FILLED flag
+# in clean_flags makes it unambiguous that nothing was extracted.
+MISSING_NARRATION_FILL        = ""
 MISSING_AMOUNT_FILL           = 0.0
+# Revised-spec compliance: debit/credit are only auto-filled with 0 when
+# the OPPOSITE side of the same row has a real (non-missing) value — i.e.
+# the row is clearly a one-sided movement and the blank cell just means
+# "no movement on this side". If BOTH debit and credit are missing on the
+# same row, that is a different, worse problem (the row may be missing its
+# entire amount data, e.g. a mis-mapped column) and is flagged
+# BOTH_AMOUNTS_MISSING instead of being silently zero-filled on both sides.
 # account_id and date have NO safe fill — they are flagged only, never
 # imputed, since guessing either would corrupt grouping/ordering logic
 # used everywhere downstream (dedup, balance continuity, velocity).
@@ -174,32 +241,46 @@ MISSING_AMOUNT_FILL           = 0.0
 # the frame. A row can accumulate multiple penalties; score floors at 0.
 QUALITY_SCORE_START = 100
 
+# Revised-spec compliance: the six categories the spec names explicitly
+# (missing narration, missing time, OCR row, balance mismatch, possible
+# duplicate, invalid amount) use EXACTLY the spec's point values below.
+# The additional categories that existed before the revision (date
+# problems, missing account_id, self-transfer, malformed IFSC, velocity,
+# outliers, UTR collision, etc.) are kept — the spec doesn't forbid extra
+# forensic signals, it only pins down the six it names — but none of them
+# overlap with a spec-named category, so there's no conflict.
 QUALITY_PENALTIES_BY_FLAG_TOKEN = {
-    "NULL_DATE":                 30,
-    "MISSING_DATE":               30,
-    "BAD_DATE_FORMAT":            25,
-    "DATE_OUT_OF_RANGE":          15,
-    "ZERO_DEBIT_AND_CREDIT":      10,
-    "INVALID_TRANSACTION":        30,
-    "BOTH_NEGATIVE_AMOUNTS":      20,
-    "MISSING_ACCOUNT_ID":         30,
-    "MISSING_NARRATION_FILLED":    8,
-    "MISSING_AMOUNT_FILLED":      10,
-    "MISSING_BALANCE":            15,
-    "MISSING_UTR":                 3,
-    "MISSING_TIME_DEFAULTED":      2,
-    "EMPTY_OR_SHORT_NARRATION":   10,
-    "BALANCE_COLUMN_NOT_POPULATED": 8,
+    "NULL_DATE":                    30,
+    "MISSING_DATE":                 30,
+    "BAD_DATE_FORMAT":              25,
+    "DATE_OUT_OF_RANGE":            15,
+    "ZERO_DEBIT_AND_CREDIT":        10,
+    "INVALID_TRANSACTION":          15,   # spec: "Invalid amount" -15
+    "BOTH_NEGATIVE_AMOUNTS":        20,
+    "MISSING_ACCOUNT_ID":           30,
+    "MISSING_NARRATION_FILLED":      5,   # spec: "Missing narration" -5
+    "MISSING_AMOUNT_FILLED":        10,
+    "BOTH_AMOUNTS_MISSING":         20,
+    "MISSING_BALANCE":              15,
+    "MISSING_UTR":                   3,
+    "MISSING_TIME_DEFAULTED":        2,   # spec: "Missing time" -2
+    "EMPTY_OR_SHORT_NARRATION":     10,
+    "BALANCE_COLUMN_NOT_POPULATED":  8,
+    "BALANCE_MISMATCH_MINOR":        5,   # lighter tier of spec's "Balance mismatch"
+    "BALANCE_MISMATCH_MAJOR":       20,   # spec: "Balance mismatch" -20
+    "POSSIBLE_DUPLICATE":           10,   # spec: "Possible duplicate" -10
 }
 
 QUALITY_PENALTIES_BY_BOOL_COLUMN = {
-    "is_duplicate":        15,   # near-duplicate flagged (exact dupes are removed, not scored)
-    "is_balance_breach":   25,
-    "is_high_value_flag":   5,
-    "is_velocity_flag":     5,
-    "is_self_transfer":     5,
-    "is_malformed_ifsc":   10,
-    "is_utr_collision":     5,
+    # is_duplicate / is_utr_collision / is_multi_file_collision all also
+    # carry the POSSIBLE_DUPLICATE token in clean_flags (see
+    # deduplicator.py), so they are NOT double-scored here as booleans —
+    # the token above already applies the spec's -10 once per row.
+    "is_high_value_flag":    5,
+    "is_velocity_flag":      5,
+    "is_self_transfer":      5,
+    "is_malformed_ifsc":    10,
+    "is_ocr_row":            5,   # spec: "OCR row" -5
 }
 
 QUALITY_BAND_THRESHOLDS = {"HIGH": 80, "MEDIUM": 50}   # score>=80 HIGH, >=50 MEDIUM, else LOW
@@ -242,6 +323,8 @@ CLEANED_OUTPUT_COLS = [
     "clean_flags",
     "is_duplicate",
     "is_balance_breach",
+    "is_balance_mismatch_minor",
+    "is_balance_mismatch_major",
     "is_high_value_flag",
     "is_ocr_row",
     "is_velocity_flag",
@@ -250,6 +333,7 @@ CLEANED_OUTPUT_COLS = [
     "is_self_transfer",
     "is_malformed_ifsc",
     "is_invalid_transaction",
+    "is_failed_transaction",
     "quality_score",
     "quality_band",
 ]
