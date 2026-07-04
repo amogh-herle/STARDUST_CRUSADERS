@@ -65,13 +65,24 @@ Returns a 4-tuple: (cleaned_df, report_dict, audit_dict)
 import difflib
 
 import pandas as pd
-from audit_utils import _merge_flag, _action
 from cleaning_config import (
     EXACT_DEDUP_KEYS, NEAR_DEDUP_KEYS, UTR_DEDUP_ENABLED,
     EXACT_DEDUP_SAME_FILE_MAX_GAP, EXACT_DEDUP_REQUIRE_UTR_MATCH,
     NEAR_DUP_NARRATION_SIMILARITY_THRESHOLD,
     HIGH_DUPLICATE_RATE_WARNING_THRESHOLD,
 )
+
+
+def _merge_flag(existing: str, new_flag: str) -> str:
+    e = str(existing).strip() if existing else ""
+    n = str(new_flag).strip() if new_flag else ""
+    if not n:
+        return e
+    if not e:
+        return n
+    if n in [t.strip() for t in e.split("|")]:
+        return e   # don't duplicate the same token twice on one row
+    return e + " | " + n
 
 
 def _find_exact_duplicate_index(df: pd.DataFrame) -> tuple[list, list]:

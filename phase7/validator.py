@@ -25,7 +25,6 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from audit_utils import _add, _action, _is_blank
 from cleaning_config import (
     DATE_FORMATS_ACCEPTED, DATE_FORMAT_CANONICAL,
     DATE_VALID_YEAR_MIN, DATE_VALID_YEAR_MAX,
@@ -342,11 +341,8 @@ def flag_failed_transactions(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list
         if kw_mask.any():
             report["failed_transaction_keyword_counts"][kw] = int(kw_mask.sum())
             matched_any = matched_any | kw_mask
-            # Vectorized (Task 1): bulk flag assignment
-            df.loc[kw_mask, "clean_flags"] = df.loc[kw_mask, "clean_flags"].apply(
-                lambda f: _add(f, f"FAILED_TRANSACTION_{kw}")
-            )
             for idx in df.index[kw_mask]:
+                df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], f"FAILED_TRANSACTION_{kw}")
                 actions.append(_action(df, idx, f"FAILED_TRANSACTION_{kw}",
                     f"'{kw}' found in narration/channel/status — transaction did not settle; "
                     f"kept and flagged, not removed"))
@@ -578,27 +574,23 @@ def validate_counterparties(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]
         cp = df["counterparty_account"].fillna("").astype(str).str.strip()
         acc = df["account_id"].fillna("").astype(str).str.strip()
         self_mask = (cp != "") & (cp == acc)
-        if self_mask.any():
-            # Vectorized (Task 1): bulk flag assignment
-            df.loc[self_mask, "is_self_transfer"] = True
-            report["self_transfers_flagged"] = int(self_mask.sum())
-            for idx in df.index[self_mask]:
-                actions.append(_action(df, idx, "SELF_TRANSFER",
-                    f"counterparty_account equals account_id ({df.loc[idx, 'account_id']}) "
-                    f"— same-account transfer, review for disguised layering hop"))
+        df.loc[self_mask, "is_self_transfer"] = True
+        report["self_transfers_flagged"] = int(self_mask.sum())
+        for idx in df.index[self_mask]:
+            actions.append(_action(df, idx, "SELF_TRANSFER",
+                f"counterparty_account equals account_id ({df.loc[idx, 'account_id']}) "
+                f"— same-account transfer, review for disguised layering hop"))
 
     if FLAG_MALFORMED_IFSC and has_cp_ifsc:
         ifsc_vals = df["counterparty_ifsc"].fillna("").astype(str).str.strip().str.upper()
         present_mask = ifsc_vals != ""
         malformed_mask = present_mask & ~ifsc_vals.apply(lambda v: bool(ifsc_pattern.match(v)))
-        if malformed_mask.any():
-            # Vectorized (Task 1): bulk flag assignment
-            df.loc[malformed_mask, "is_malformed_ifsc"] = True
-            report["malformed_ifsc_flagged"] = int(malformed_mask.sum())
-            for idx in df.index[malformed_mask]:
-                actions.append(_action(df, idx, "MALFORMED_IFSC",
-                    f"counterparty_ifsc '{df.loc[idx, 'counterparty_ifsc']}' does not match "
-                    f"the standard IFSC pattern (4 letters + 0 + 6 alphanumeric)"))
+        df.loc[malformed_mask, "is_malformed_ifsc"] = True
+        report["malformed_ifsc_flagged"] = int(malformed_mask.sum())
+        for idx in df.index[malformed_mask]:
+            actions.append(_action(df, idx, "MALFORMED_IFSC",
+                f"counterparty_ifsc '{df.loc[idx, 'counterparty_ifsc']}' does not match "
+                f"the standard IFSC pattern (4 letters + 0 + 6 alphanumeric)"))
 
     return df, report, actions
 
@@ -788,25 +780,47 @@ def flag_empty_narrations(df: pd.DataFrame) -> tuple[pd.DataFrame, dict, list]:
     actions = []
     df = df.copy()
 
-    # Vectorized (Task 1): use .loc with mask instead of row-by-row .at
     narr = df["narration"].fillna("").astype(str).str.strip()
     short_mask = narr.str.len() < NARRATION_MIN_LEN_FLAG
 
     df["clean_flags"] = df.get("clean_flags", "")
-    if short_mask.any():
-        df.loc[short_mask, "clean_flags"] = df.loc[short_mask, "clean_flags"].apply(
-            lambda f: _add(f, "EMPTY_OR_SHORT_NARRATION")
-        )
-        for idx in df.index[short_mask]:
-            actions.append(_action(df, idx, "EMPTY_OR_SHORT_NARRATION",
-                f"Narration is empty or under {NARRATION_MIN_LEN_FLAG} chars after cleaning "
-                f"— context may be missing for this transaction"))
+    for idx in df.index[short_mask]:
+        df.at[idx, "clean_flags"] = _add(df.at[idx, "clean_flags"], "EMPTY_OR_SHORT_NARRATION")
+        actions.append(_action(df, idx, "EMPTY_OR_SHORT_NARRATION",
+            f"Narration is empty or under {NARRATION_MIN_LEN_FLAG} chars after cleaning "
+            f"— context may be missing for this transaction"))
     report["empty_narration_rows"] = int(short_mask.sum())
 
     return df, report, actions
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers (now imported from audit_utils.py)
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
-# _add(), _action(), and _is_blank() are now imported from audit_utils at the top of this file
+def _add(existing: str, flag: str) -> str:
+    existing = str(existing).strip() if existing else ""
+    return flag if not existing else existing + " | " + flag
+
+
+def _action(df: pd.DataFrame, row_idx, action_type: str, detail: str) -> dict:
+    """Build one row for the all_actions.csv audit log."""
+    try:
+        row = df.iloc[row_idx] if isinstance(row_idx, int) else df.loc[row_idx]
+        return {
+            "row_index":    row_idx,
+            "account_id":   row.get("account_id", ""),
+            "date":         row.get("date", ""),
+            "narration":    str(row.get("narration", ""))[:80],
+            "debit":        row.get("debit", ""),
+            "credit":       row.get("credit", ""),
+            "balance":      row.get("balance", ""),
+            "source_file":  row.get("source_file", ""),
+            "action_type":  action_type,
+            "detail":       detail,
+        }
+    except Exception:
+        return {
+            "row_index": row_idx, "account_id": "", "date": "",
+            "narration": "", "debit": "", "credit": "", "balance": "",
+            "source_file": "", "action_type": action_type, "detail": detail,
+        }
