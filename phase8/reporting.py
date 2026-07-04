@@ -168,36 +168,51 @@ def _write_pdf_report(
 
 
 def _write_plain_pdf(path: Path, lines: list[str]) -> None:
-    def esc(text: str) -> str:
-        return text.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')[:110]
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    
+    doc = SimpleDocTemplate(
+        str(path),
+        pagesize=letter,
+        rightMargin=54,
+        leftMargin=54,
+        topMargin=54,
+        bottomMargin=54
+    )
+    styles = getSampleStyleSheet()
+    
+    line_style = ParagraphStyle(
+        'LineStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9,
+        leading=12,
+        textColor='#111111'
+    )
+    
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=16,
+        leading=20,
+        textColor='#1b3a4b',
+        spaceAfter=12
+    )
 
-    stream_lines = []
-    y = 770
+    story = []
+    first = True
     for line in lines:
-        if y < 50:
-            break
-        stream_lines.append(f"BT /F1 10 Tf 50 {y} Td ({esc(line)}) Tj ET")
-        y -= 14
-
-    stream = '\n'.join(stream_lines).encode('latin1')
-    objs = []
-    objs.append(b'1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n')
-    objs.append(b'2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n')
-    objs.append(b'3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n')
-    objs.append(b'4 0 obj\n<< /Length ' + str(len(stream)).encode('latin1') + b' >>\nstream\n' + stream + b'\nendstream\nendobj\n')
-    objs.append(b'5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n')
-    offsets = []
-    pos = 0
-    for obj in objs:
-        offsets.append(pos)
-        pos += len(obj)
-    pdf = b'%PDF-1.4\n'
-    for obj in objs:
-        pdf += obj
-    xref_start = len(pdf)
-    pdf += b'xref\n0 6\n0000000000 65535 f \n'
-    for off in offsets:
-        pdf += f'{off:010d} 00000 n \n'.encode('latin1')
-    pdf += b'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'
-    pdf += str(xref_start).encode('latin1') + b'\n%%EOF\n'
-    path.write_bytes(pdf)
+        if not line.strip():
+            story.append(Spacer(1, 8))
+            continue
+            
+        escaped_line = html.escape(line)
+        if first:
+            story.append(Paragraph(escaped_line, title_style))
+            first = False
+        else:
+            story.append(Paragraph(escaped_line, line_style))
+            
+    doc.build(story)

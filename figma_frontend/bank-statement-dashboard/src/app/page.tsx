@@ -28,8 +28,12 @@ export default function Home() {
 
         <main className="flex flex-1 flex-col items-center justify-center px-8 py-12">
           {view === "upload" && <UploadZone onSubmit={handleSubmit} />}
-          {view === "reports" && (
-            <ReportView files={submittedFiles} uploadResult={uploadResult} />
+          {(view === "reports" || view === "graph") && (
+            <ReportView 
+              files={submittedFiles} 
+              uploadResult={uploadResult} 
+              activeSubView={view} 
+            />
           )}
           {view === "library" && <LibraryView />}
         </main>

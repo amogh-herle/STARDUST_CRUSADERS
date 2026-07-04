@@ -9,6 +9,7 @@ import { View } from "./Sidebar";
 const TITLES: Record<View, string> = {
   upload: "Upload bank statements",
   reports: "Reports",
+  graph: "Graph View",
   library: "Library",
 };
 

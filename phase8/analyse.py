@@ -43,7 +43,7 @@ from pattern_detectors import (
 )
 from community import detect_communities, detect_scc_cycles, compute_community_risk
 from aml_inference import get_account_isolation_scores
-from money_trail      import trace_forward, trace_backward, trace_forward_fifo, trace_backward_fifo, generate_investigator_ledger
+from money_trail      import trace_forward, trace_backward, trace_forward_fifo, generate_investigator_ledger
 from reporting       import generate_investigator_report
 from risk_scorer      import analyse_beneficiaries, compute_risk_scores, compute_graph_metrics
 from analytics_config import ANALYTICS_FLAG_COLS
@@ -259,10 +259,7 @@ def run_analytics(
             "file":      os.path.basename(fifo_path),
         })
 
-        # Backward (heuristic beneficiary-similarity walk, now fixed —
-        # see _build_tx_index bugfix; previously always returned 0 rows
-        # for every account because credit-row amounts were silently
-        # read from the `debit` column)
+        # Backward
         bwd_trails = trace_backward(acc_id, txn_graph, df)
         bwd_rows   = [r for t in bwd_trails for r in t.to_records()]
         bwd_path   = os.path.join(trails_dir, f"trail_{acc_id}_backward.csv")
@@ -274,21 +271,6 @@ def run_analytics(
             "trails":    len(bwd_trails),
             "status":    "ok" if bwd_rows else "no_hops",
             "file":      os.path.basename(bwd_path),
-        })
-
-        # Backward FIFO (balance-based, hackathon-compliant): for every
-        # outgoing debit, which earlier credit(s) actually funded it.
-        bwd_fifo_trails = trace_backward_fifo(str(acc_id), df)
-        bwd_fifo_rows   = [r for t in bwd_fifo_trails for r in t.to_records()]
-        bwd_fifo_path   = os.path.join(trails_dir, f"trail_{acc_id}_backward_fifo.csv")
-        pd.DataFrame(bwd_fifo_rows, columns=_trail_cols()).to_csv(bwd_fifo_path, index=False)
-        trail_manifest.append({
-            "account":   acc_id,
-            "direction": "backward_fifo",
-            "hops":      len(bwd_fifo_rows),
-            "trails":    len(bwd_fifo_trails),
-            "status":    "ok" if bwd_fifo_rows else "no_debits",
-            "file":      os.path.basename(bwd_fifo_path),
         })
 
     report["trail_manifest"] = trail_manifest

@@ -836,20 +836,27 @@ def _record_destination(
     })
 
 def _add_path_to_chains(laundering_chains, trail_id, path, node_meta):
-    for idx, hop in enumerate(path):
-        to_acc_str = str(hop["to_account"])
-        meta = node_meta.get(to_acc_str, {})
-        laundering_chains.append({
-            "trail_id": trail_id,
-            "hop_number": idx + 1,
-            "from_account": hop["from_account"],
-            "to_account": hop["to_account"],
-            "amount": round(hop["amount"], 2),
-            "date": hop["date"],
-            "channel": hop["channel"],
-            "risk_score": meta.get("risk_score", 0.0),
-            "community_id": meta.get("community_id", "UNKNOWN"),
-        })
+    if not path:
+        return
+    source = path[0]["from_account"]
+    collector = path[-1]["to_account"]
+    
+    intermediates = [str(hop["to_account"]) for hop in path[:-1]]
+    intermediate_accounts = "; ".join(intermediates) if intermediates else ""
+    
+    all_nodes = [source] + [hop["to_account"] for hop in path]
+    max_risk = max([float(node_meta.get(str(n), {}).get("risk_score", 0.0)) for n in all_nodes])
+    
+    laundering_chains.append({
+        "chain_id": trail_id,
+        "source": source,
+        "intermediate_accounts": intermediate_accounts,
+        "collector": collector,
+        "amount": round(path[-1]["amount"], 2),
+        "depth": len(path),
+        "risk": round(max_risk, 2)
+    })
+
 
 def _add_path_to_graph(cy_nodes, cy_edges, path, trail_id, node_meta, node_roles):
     node_ids = set()
@@ -1010,7 +1017,11 @@ def generate_investigator_ledger(
     df: pd.DataFrame,
     out_dir: str,
     risk_scores_dict: dict,
+    node_meta: dict = None,
+    node_roles: dict = None,
 ):
+    from graph_builder import is_merchant
+
     try:
         acc_txns = _filter_account_rows(df, account_id).copy()
     except (ValueError, TypeError):
@@ -1103,6 +1114,106 @@ def generate_investigator_ledger(
         cols = ['credit_date', 'credit_amount', 'credit_source', 'debit_date', 'debit_amount', 'debit_destination', 'allocation_amount', 'remaining_credit', 'risk_flag']
         pd.DataFrame(columns=cols).to_csv(ledger_path, index=False)
 
+    # Export Cytoscape-formatted JSON
+    cy_nodes = []
+    cy_edges = []
+    added_nodes = set()
+
+    def get_node_data(nid):
+        meta = {}
+        if node_meta and nid in node_meta:
+            meta = node_meta[nid]
+        
+        role = "unknown"
+        if node_roles and nid in node_roles:
+            role = node_roles[nid]
+        elif is_merchant(nid):
+            role = "merchant"
+            
+        risk_score = 0.0
+        if meta.get("risk_score") is not None:
+            risk_score = float(meta["risk_score"])
+            
+        risk_tier = "LOW"
+        if meta.get("risk_tier"):
+            risk_tier = meta["risk_tier"]
+        elif risk_scores_dict and nid in risk_scores_dict:
+            risk_tier = risk_scores_dict[nid]
+            if risk_tier == "CRITICAL": risk_score = 85.0
+            elif risk_tier == "HIGH": risk_score = 65.0
+            elif risk_tier == "MEDIUM": risk_score = 45.0
+            
+        return {
+            "id": nid,
+            "label": meta.get("account_holder", nid) or nid,
+            "bank": meta.get("bank_name", "UNKNOWN Bank") or "UNKNOWN Bank",
+            "risk_score": risk_score,
+            "risk_tier": risk_tier,
+            "role": role,
+            "is_seed": nid == account_id,
+            "is_internal": meta.get("is_internal", nid.isdigit() and len(nid) >= 10)
+        }
+
+    # Add seed node
+    cy_nodes.append({"data": get_node_data(account_id)})
+    added_nodes.add(account_id)
+
+    # Process ledger_rows to build unique nodes and edges
+    edge_map = {}
+    for idx, row in enumerate(ledger_rows):
+        src = str(row["credit_source"]).strip()
+        dst = str(row["debit_destination"]).strip()
+        amt = float(row["allocation_amount"])
+        date = str(row["debit_date"])
+        risk = str(row["risk_flag"])
+
+        if not src: src = "UNKNOWN"
+        if not dst: dst = "UNKNOWN"
+
+        if src not in added_nodes:
+            cy_nodes.append({"data": get_node_data(src)})
+            added_nodes.add(src)
+
+        if dst not in added_nodes:
+            cy_nodes.append({"data": get_node_data(dst)})
+            added_nodes.add(dst)
+
+        # Source -> Seed
+        if src != account_id:
+            edge_key_1 = (src, account_id)
+            if edge_key_1 not in edge_map:
+                edge_map[edge_key_1] = {"amount": 0.0, "dates": set(), "risk_flags": set()}
+            edge_map[edge_key_1]["amount"] += amt
+            edge_map[edge_key_1]["dates"].add(date)
+            edge_map[edge_key_1]["risk_flags"].add(risk)
+
+        # Seed -> Destination
+        if dst != account_id:
+            edge_key_2 = (account_id, dst)
+            if edge_key_2 not in edge_map:
+                edge_map[edge_key_2] = {"amount": 0.0, "dates": set(), "risk_flags": set()}
+            edge_map[edge_key_2]["amount"] += amt
+            edge_map[edge_key_2]["dates"].add(date)
+            edge_map[edge_key_2]["risk_flags"].add(risk)
+
+    for idx, ((s, t), info) in enumerate(edge_map.items()):
+        cy_edges.append({
+            "data": {
+                "id": f"e_{account_id}_{idx}",
+                "source": s,
+                "target": t,
+                "amount": info["amount"],
+                "dates": sorted(list(info["dates"])),
+                "risk_flag": "SUSPICIOUS" if "SUSPICIOUS" in info["risk_flags"] else "NORMAL"
+            }
+        })
+
+    cy_graph = {"nodes": cy_nodes, "edges": cy_edges}
+    json_path = os.path.join(out_dir, f"ledger_{account_id}_graph.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(cy_graph, f, indent=2)
+    print(f"[FIFO Ledger Graph] Exported Cytoscape JSON for account {account_id} -> {json_path}")
+
 def generate_money_trail_outputs(
     out_dir: str,
     df: pd.DataFrame,
@@ -1122,7 +1233,7 @@ def generate_money_trail_outputs(
     risk_scores_dict = {str(row["account_id"]): str(row["risk_tier"]) for _, row in risk_df.iterrows()}
     
     for acc in top_accounts:
-        generate_investigator_ledger(str(acc), df, out_dir, risk_scores_dict)
+        generate_investigator_ledger(str(acc), df, out_dir, risk_scores_dict, node_meta, node_roles)
         
     laundering_chains, destination_accounts, cy_graph = trace_all_money_trails(
         df, top_accounts, risk_scores_dict, node_meta, node_roles
@@ -1131,7 +1242,7 @@ def generate_money_trail_outputs(
     chains_df = pd.DataFrame(laundering_chains)
     chains_csv_path = os.path.join(out_dir, "laundering_chains.csv")
     chains_df.to_csv(chains_csv_path, index=False)
-    print(f"        Saved laundering chains ({len(laundering_chains)} hops) → {chains_csv_path}")
+    print(f"        Saved laundering chains ({len(laundering_chains)} chains) → {chains_csv_path}")
     
     dests_df = pd.DataFrame(destination_accounts)
     dests_csv_path = os.path.join(out_dir, "destination_accounts.csv")

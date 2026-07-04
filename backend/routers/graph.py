@@ -220,3 +220,323 @@ async def full_graph(
 
     account_ids = (await db.execute(q)).scalars().all()
     return await _build_graph_from_account_ids(list(account_ids), db)
+
+
+# ---------------------------------------------------------------------------
+# Ledger trace — Load pre-generated Cytoscape JSON or fallback parse ledger CSV
+# ---------------------------------------------------------------------------
+@router.get("/ledger-trace/{account_id}")
+async def get_ledger_trace(account_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Load pre-generated Cytoscape JSON for an account ledger.
+    If not found, parses the CSV and returns dynamically generated Cytoscape format.
+    If CSV is also not found, falls back to querying the database dynamically.
+    """
+    from pathlib import Path
+    import json
+    import os
+    import pandas as pd
+
+    # 1. Try to find ledger_{account_id}_graph.json
+    project_root = Path(__file__).resolve().parents[2]
+    dirs_to_try = [
+        project_root / "data" / "analytics_v2",
+        project_root / "phase8" / "analytics",
+        project_root / "phase8" / "analytics_final",
+    ]
+    
+    json_path = None
+    csv_path = None
+    
+    for d in dirs_to_try:
+        j_p = d / f"ledger_{account_id}_graph.json"
+        c_p = d / f"ledger_{account_id}.csv"
+        if j_p.exists():
+            json_path = j_p
+            break
+        elif c_p.exists():
+            csv_path = c_p
+    
+    if json_path:
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass # fallback to CSV
+            
+    # 2. Dynamic CSV parsing fallback
+    if not csv_path:
+        for d in dirs_to_try:
+            c_p = d / f"ledger_{account_id}.csv"
+            if c_p.exists():
+                csv_path = c_p
+                break
+                
+    if csv_path:
+        try:
+            df = pd.read_csv(csv_path, dtype=str)
+            
+            # Read risk scores from risk_scores.csv if possible to color nodes
+            risk_map = {}
+            for d in dirs_to_try:
+                r_csv = d / "risk_scores.csv"
+                if r_csv.exists():
+                    try:
+                        r_df = pd.read_csv(r_csv, dtype=str)
+                        for _, row in r_df.iterrows():
+                            risk_map[row["account_id"]] = {
+                                "risk_score": float(row.get("risk_score", 0.0)),
+                                "risk_tier": row.get("risk_tier", "LOW")
+                            }
+                        break
+                    except Exception:
+                        pass
+            
+            nodes = []
+            edges = []
+            added = set()
+            
+            def make_node(nid):
+                risk_info = risk_map.get(nid, {})
+                risk_score = risk_info.get("risk_score", 0.0)
+                risk_tier = risk_info.get("risk_tier", "LOW")
+                if not risk_score and nid == account_id:
+                    risk_score = 80.0
+                    risk_tier = "CRITICAL"
+                
+                return {
+                    "data": {
+                        "id": nid,
+                        "label": nid,
+                        "bank": "UNKNOWN Bank",
+                        "risk_score": risk_score,
+                        "risk_tier": risk_tier,
+                        "role": "mule" if nid == account_id else "unknown",
+                        "is_seed": nid == account_id,
+                        "is_internal": nid.isdigit() and len(nid) >= 10
+                    }
+                }
+                
+            nodes.append(make_node(account_id))
+            added.add(account_id)
+            
+            edge_map = {}
+            for _, row in df.iterrows():
+                src = str(row.get("credit_source", "UNKNOWN")).strip()
+                dst = str(row.get("debit_destination", "UNKNOWN")).strip()
+                amt = float(row.get("allocation_amount", 0.0))
+                date = str(row.get("debit_date", ""))
+                risk = str(row.get("risk_flag", "NORMAL"))
+                
+                if src not in added:
+                    nodes.append(make_node(src))
+                    added.add(src)
+                if dst not in added:
+                    nodes.append(make_node(dst))
+                    added.add(dst)
+                    
+                if src != account_id:
+                    k1 = (src, account_id)
+                    if k1 not in edge_map:
+                        edge_map[k1] = {"amount": 0.0, "dates": set(), "risks": set()}
+                    edge_map[k1]["amount"] += amt
+                    edge_map[k1]["dates"].add(date)
+                    edge_map[k1]["risks"].add(risk)
+                    
+                if dst != account_id:
+                    k2 = (account_id, dst)
+                    if k2 not in edge_map:
+                        edge_map[k2] = {"amount": 0.0, "dates": set(), "risks": set()}
+                    edge_map[k2]["amount"] += amt
+                    edge_map[k2]["dates"].add(date)
+                    edge_map[k2]["risks"].add(risk)
+                    
+            for idx, ((s, t), info) in enumerate(edge_map.items()):
+                edges.append({
+                    "data": {
+                        "id": f"e_{account_id}_{idx}",
+                        "source": s,
+                        "target": t,
+                        "amount": info["amount"],
+                        "dates": sorted(list(info["dates"])),
+                        "risk_flag": "SUSPICIOUS" if "SUSPICIOUS" in info["risks"] else "NORMAL"
+                    }
+                })
+                
+            return {"nodes": nodes, "edges": edges}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed parsing ledger: {str(e)}")
+
+    # 3. Dynamic Database parsing fallback (when files do not exist for this neighbor/account)
+    try:
+        from models import Transaction, Account
+        
+        # Query transactions of the account
+        txn_stmt = select(Transaction).where(Transaction.account_id == account_id).order_by(Transaction.date, Transaction.time)
+        db_txns = (await db.execute(txn_stmt)).scalars().all()
+        
+        if db_txns:
+            credit_queue = []
+            ledger_rows = []
+            
+            # Fetch risk score mapping for counterparties
+            counterparty_ids = set()
+            for t in db_txns:
+                if t.counterparty_account_id:
+                    counterparty_ids.add(t.counterparty_account_id)
+            
+            risk_map = {}
+            if counterparty_ids:
+                acct_stmt = select(Account).where(Account.account_id.in_(list(counterparty_ids)))
+                db_accts = (await db.execute(acct_stmt)).scalars().all()
+                for a in db_accts:
+                    risk_map[a.account_id] = {
+                        "risk_score": float(a.risk_score),
+                        "risk_tier": "CRITICAL" if a.risk_score >= 75 else "HIGH" if a.risk_score >= 50 else "MEDIUM" if a.risk_score >= 25 else "LOW"
+                    }
+            
+            # Seed account risk info
+            seed_acct = await db.get(Account, account_id)
+            seed_score = float(seed_acct.risk_score) if seed_acct else 80.0
+            seed_risk_tier = "CRITICAL" if seed_score >= 75 else "HIGH" if seed_score >= 50 else "MEDIUM" if seed_score >= 25 else "LOW"
+
+            # Run FIFO allocation logic
+            for row in db_txns:
+                debit_amt = float(row.debit or 0.0)
+                credit_amt = float(row.credit or 0.0)
+                date_str = str(row.date or "")
+                
+                if credit_amt > 0:
+                    source = row.counterparty_account_id or row.counterparty_name or "UNKNOWN"
+                    credit_queue.append({
+                        'date': date_str,
+                        'amount': credit_amt,
+                        'source': source,
+                        'remaining': credit_amt
+                    })
+                    
+                if debit_amt > 0:
+                    destination = row.counterparty_account_id or row.counterparty_name or "UNKNOWN"
+                    
+                    # Determine risk flag
+                    dest_risk = "LOW"
+                    if destination in risk_map:
+                        dest_risk = risk_map[destination].get("risk_tier", "LOW")
+                    
+                    has_flags = row.is_high_value_flag or row.is_balance_breach or (row.final_risk_score and row.final_risk_score >= 0.7)
+                    risk_flag = 'SUSPICIOUS' if (dest_risk in ['HIGH', 'CRITICAL'] or has_flags) else 'NORMAL'
+                    
+                    remaining_debit = debit_amt
+                    while remaining_debit > 0 and credit_queue:
+                        oldest_credit = credit_queue[0]
+                        allocated = min(remaining_debit, oldest_credit['remaining'])
+                        
+                        oldest_credit['remaining'] -= allocated
+                        remaining_debit -= allocated
+                        
+                        ledger_rows.append({
+                            'credit_date': oldest_credit['date'],
+                            'credit_amount': oldest_credit['amount'],
+                            'credit_source': oldest_credit['source'],
+                            'debit_date': date_str,
+                            'debit_amount': debit_amt,
+                            'debit_destination': destination,
+                            'allocation_amount': allocated,
+                            'remaining_credit': oldest_credit['remaining'],
+                            'risk_flag': risk_flag
+                        })
+                        
+                        if oldest_credit['remaining'] <= 0:
+                            credit_queue.pop(0)
+                            
+                    if remaining_debit > 0:
+                        ledger_rows.append({
+                            'credit_date': 'PRIOR_BALANCE',
+                            'credit_amount': 0.0,
+                            'credit_source': 'PRIOR_BALANCE',
+                            'debit_date': date_str,
+                            'debit_amount': debit_amt,
+                            'debit_destination': destination,
+                            'allocation_amount': remaining_debit,
+                            'remaining_credit': 0.0,
+                            'risk_flag': risk_flag
+                        })
+                        
+            # Build Cytoscape elements
+            nodes = []
+            edges = []
+            added = set()
+            
+            def make_node(nid):
+                risk_info = risk_map.get(nid, {})
+                risk_score = risk_info.get("risk_score", 0.0)
+                risk_tier = risk_info.get("risk_tier", "LOW")
+                if not risk_score and nid == account_id:
+                    risk_score = seed_score
+                    risk_tier = seed_risk_tier
+                
+                return {
+                    "data": {
+                        "id": nid,
+                        "label": nid,
+                        "bank": "UNKNOWN Bank" if nid != account_id else (seed_acct.bank_name if seed_acct else "UNKNOWN Bank"),
+                        "risk_score": risk_score,
+                        "risk_tier": risk_tier,
+                        "role": "mule" if nid == account_id else "unknown",
+                        "is_seed": nid == account_id,
+                        "is_internal": nid.isdigit() and len(nid) >= 10
+                    }
+                }
+                
+            nodes.append(make_node(account_id))
+            added.add(account_id)
+            
+            edge_map = {}
+            for row in ledger_rows:
+                src = str(row.get("credit_source", "UNKNOWN")).strip()
+                dst = str(row.get("debit_destination", "UNKNOWN")).strip()
+                amt = float(row.get("allocation_amount", 0.0))
+                date = str(row.get("debit_date", ""))
+                risk = str(row.get("risk_flag", "NORMAL"))
+                
+                if src not in added:
+                    nodes.append(make_node(src))
+                    added.add(src)
+                if dst not in added:
+                    nodes.append(make_node(dst))
+                    added.add(dst)
+                    
+                if src != account_id:
+                    k1 = (src, account_id)
+                    if k1 not in edge_map:
+                        edge_map[k1] = {"amount": 0.0, "dates": set(), "risks": set()}
+                    edge_map[k1]["amount"] += amt
+                    edge_map[k1]["dates"].add(date)
+                    edge_map[k1]["risks"].add(risk)
+                    
+                if dst != account_id:
+                    k2 = (account_id, dst)
+                    if k2 not in edge_map:
+                        edge_map[k2] = {"amount": 0.0, "dates": set(), "risks": set()}
+                    edge_map[k2]["amount"] += amt
+                    edge_map[k2]["dates"].add(date)
+                    edge_map[k2]["risks"].add(risk)
+                    
+            for idx, ((s, t), info) in enumerate(edge_map.items()):
+                edges.append({
+                    "data": {
+                        "id": f"e_{account_id}_{idx}",
+                        "source": s,
+                        "target": t,
+                        "amount": info["amount"],
+                        "dates": sorted(list(info["dates"])),
+                        "risk_flag": "SUSPICIOUS" if "SUSPICIOUS" in info["risks"] else "NORMAL"
+                    }
+                })
+                
+            return {"nodes": nodes, "edges": edges}
+    except Exception as e:
+        print(f"Failed dynamic database trace fallback: {str(e)}")
+
+    raise HTTPException(status_code=404, detail=f"Ledger trace for account {account_id} not found")
+

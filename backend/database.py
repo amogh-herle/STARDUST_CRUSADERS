@@ -32,8 +32,11 @@ if "postgresql" in db_url:
             s.connect(("127.0.0.1", 5432))
             s.close()
         except Exception:
-            db_url = "sqlite+aiosqlite:///cidecode.db"
-            print("⚠ PostgreSQL not running on localhost:5432. Falling back to SQLite: cidecode.db")
+            import os
+            backend_dir = os.path.dirname(os.path.abspath(__file__))
+            db_path = os.path.join(backend_dir, "cidecode.db")
+            db_url = f"sqlite+aiosqlite:///{db_path}"
+            print(f"⚠ PostgreSQL not running on localhost:5432. Falling back to SQLite: {db_path}")
 
 engine_kwargs = {
     "pool_pre_ping": True,

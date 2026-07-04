@@ -103,3 +103,85 @@ export async function chat(
   }
   return res.json();
 }
+
+export interface CytoscapeNode {
+  data: {
+    id: string;
+    label: string;
+    bank: string;
+    risk_score: number;
+    risk_tier: string;
+    role: string;
+    is_seed: boolean;
+    is_internal: boolean;
+  };
+}
+
+export interface CytoscapeEdge {
+  data: {
+    id: string;
+    source: string;
+    target: string;
+    amount: number;
+    dates: string[];
+    risk_flag: string;
+  };
+}
+
+export interface CytoscapeGraph {
+  nodes: CytoscapeNode[];
+  edges: CytoscapeEdge[];
+}
+
+/**
+ * Fetch the ledger money trail Cytoscape graph payload for an account.
+ */
+export async function getLedgerTrace(accountId: string): Promise<CytoscapeGraph> {
+  const res = await fetch(`${BASE}/api/v1/graph/ledger-trace/${accountId}`);
+  if (!res.ok) throw new Error(`Failed to fetch ledger trace for account ${accountId}`);
+  return res.json();
+}
+
+export interface Transaction {
+  id: string;
+  transaction_id?: string;
+  account_id: string;
+  date: string;
+  time: string;
+  narration: string;
+  channel: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  utr_ref?: string;
+  counterparty_account_id?: string;
+  counterparty_name?: string;
+  is_duplicate: boolean;
+  is_balance_breach: boolean;
+  is_high_value_flag: boolean;
+  is_ocr_row: boolean;
+  final_risk_score?: number;
+}
+
+export interface PaginatedTransactions {
+  total: number;
+  page: number;
+  page_size: number;
+  items: Transaction[];
+}
+
+/**
+ * Fetch transactions for one account.
+ */
+export async function getAccountTransactions(
+  accountId: string,
+  page: number = 1,
+  pageSize: number = 100
+): Promise<PaginatedTransactions> {
+  const res = await fetch(
+    `${BASE}/api/v1/accounts/${accountId}/transactions?page=${page}&page_size=${pageSize}`
+  );
+  if (!res.ok) throw new Error(`Failed to fetch transactions for account ${accountId}`);
+  return res.json();
+}
+

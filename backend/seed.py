@@ -12,8 +12,21 @@ def utcnow():
 async def seed_database():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cleaned_csv = os.path.join(base_dir, "phase7", "cleaned", "cleaned_transactions.csv")
-    risk_scores_csv = os.path.join(base_dir, "phase8", "analytics", "risk_scores.csv")
-    community_summaries_csv = os.path.join(base_dir, "phase8", "analytics", "community_summaries.csv")
+    
+    # Try multiple analytics directories
+    risk_scores_csv = None
+    community_summaries_csv = None
+    for d in ["analytics_final", "analytics", "analytics_v2"]:
+        rcsv = os.path.join(base_dir, "phase8", d, "risk_scores.csv")
+        ccsv = os.path.join(base_dir, "phase8", d, "community_summaries.csv")
+        if os.path.exists(rcsv):
+            risk_scores_csv = rcsv
+            community_summaries_csv = ccsv
+            break
+            
+    if not risk_scores_csv:
+        risk_scores_csv = os.path.join(base_dir, "phase8", "analytics", "risk_scores.csv")
+        community_summaries_csv = os.path.join(base_dir, "phase8", "analytics", "community_summaries.csv")
 
     if not os.path.exists(cleaned_csv) or not os.path.exists(risk_scores_csv):
         print(f"⚠ Missing cleaned transactions or risk scores CSVs at {cleaned_csv} or {risk_scores_csv}. Cannot seed database.")

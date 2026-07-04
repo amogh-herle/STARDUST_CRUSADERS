@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 
-export type View = "upload" | "reports" | "library";
+export type View = "upload" | "reports" | "graph" | "library";
 
 const NAV: { id: View; label: string; icon: string }[] = [
   { id: "upload", label: "Upload", icon: "⬆" },
   { id: "reports", label: "Reports", icon: "▤" },
+  { id: "graph", label: "Graph View", icon: "🕸" },
   { id: "library", label: "Library", icon: "▥" },
 ];
 

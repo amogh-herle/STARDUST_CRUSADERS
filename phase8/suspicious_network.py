@@ -188,7 +188,7 @@ def build_suspicious_network(
         elif node in smurfing_accounts or node in layering_accounts or (is_internal and indegree > 0 and outdegree > 0):
             node_role = "mule"
         elif not is_internal:
-            node_role = "victim"
+            node_role = "victim" if outdegree > 0 else "unknown"
         else:
             node_role = "unknown"
 
