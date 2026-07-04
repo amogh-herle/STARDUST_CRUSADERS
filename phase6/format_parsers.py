@@ -1218,26 +1218,17 @@ def parse_image(file_path):
             "Tesseract executable not found on PATH. Install tesseract-ocr and ensure it is available in your PATH."
         ]
 
-    warnings = []
     try:
         img = Image.open(file_path).convert("L")
-        w,h = img.size
-        scale = max(1, 2400//max(w,1))
-        if scale > 1:
-            img = img.resize((w*scale, h*scale), Image.LANCZOS)
-        img = IE.Contrast(img).enhance(1.5)
-        img = IE.Sharpness(img).enhance(2.0)
-        tsv = pytesseract.image_to_data(
-            img, config="--psm 6 --oem 3",
-            output_type=pytesseract.Output.DATAFRAME
-        )
-        raw_text = pytesseract.image_to_string(img, config="--psm 6 --oem 3")
-        lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-        header_text = " ".join(lines[:5])
     except Exception as e:
         return pd.DataFrame(), "", "image", [f"OCR error: {e}"]
 
-    return _ocr_image_df(img, warnings, source_format="image")
+    # All preprocessing (resize/contrast/sharpen) + OCR happens exactly
+    # once, inside _ocr_image_df. Doing it here too (as before) meant the
+    # image got contrast/sharpness-enhanced TWICE before OCR ever ran,
+    # which was degrading text just enough to drop header tokens like
+    # "Credit" that a single clean pass reads at 90%+ confidence.
+    return _ocr_image_df(img, [], source_format="image")
 
 
 def _ocr_image_df(img, warnings, source_format="image"):
@@ -1258,13 +1249,20 @@ def _ocr_image_df(img, warnings, source_format="image"):
         img = img.resize((w*scale, h*scale), Image.LANCZOS)
     img = IE.Contrast(img).enhance(1.5)
     img = IE.Sharpness(img).enhance(2.0)
+    # Extra unsharp-mask pass on top of PIL's Sharpness filter: on very
+    # small source images (under ~500px wide — common with screenshot-
+    # exported statements) the plain LANCZOS upscale + Sharpness alone
+    # still leaves characters too soft for Tesseract to read reliably.
+    if w < 500:
+        from PIL import ImageFilter
+        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=2))
     tsv = pytesseract.image_to_data(
         img, config="--psm 6 --oem 3",
         output_type=pytesseract.Output.DATAFRAME
     )
     raw_text = pytesseract.image_to_string(img, config="--psm 6 --oem 3")
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-    header_text = " ".join(lines[:5])
+    header_text = " ".join(lines[:40])
 
     df = _ocr_bbox_df(tsv, warnings)
     if df.empty and lines:
@@ -1295,12 +1293,57 @@ def _ocr_bbox_df(tsv, warnings):
         })
     logical.sort(key=lambda x: x["top"])
 
+    # Exact substring matching only works when OCR reads the header
+    # cleanly. On low-resolution source images (small screenshots,
+    # heavily compressed exports) individual header words get garbled
+    # ("Credit" -> "Crede", "Balance" -> "Sateece") and never match a
+    # literal keyword, even though the row is clearly still the header
+    # to a human eye. Falling back to fuzzy word similarity recovers
+    # these cases without weakening detection on clean OCR (an exact
+    # match still always scores 1.0, well above the threshold).
+    import difflib
     HDR_KW = ["date","debit","credit","balance","narration","description",
-              "withdrawal","deposit","particulars","amount","ref","txn"]
+              "withdrawal","deposit","particulars","amount","ref","txn",
+              "cheque","transaction"]
+
+    def _fuzzy_hdr_hits(text):
+        words = [w for w in re.split(r'[^a-zA-Z]+', text.lower()) if w]
+        if not words:
+            return 0
+        hits = 0
+        for kw in HDR_KW:
+            best = max(
+                (difflib.SequenceMatcher(None, kw, w).ratio() for w in words),
+                default=0
+            )
+            if best >= 0.72:
+                hits += 1
+        return hits
+
+    def _looks_like_hdr_row(text):
+        words = [w for w in re.split(r'[^a-zA-Z]+', text.lower()) if w]
+        if not words:
+            return False
+        has_dateish = any(
+            difflib.SequenceMatcher(None, kw, w).ratio() >= 0.72
+            for kw in ("date", "post", "txn", "tran")
+            for w in words
+        )
+        has_descish = any(
+            difflib.SequenceMatcher(None, kw, w).ratio() >= 0.72
+            for kw in ("narration", "description", "particulars", "transaction")
+            for w in words
+        )
+        has_moneyish = any(
+            difflib.SequenceMatcher(None, kw, w).ratio() >= 0.72
+            for kw in ("debit", "credit", "balance")
+            for w in words
+        )
+        return has_dateish and has_descish and has_moneyish
+
     hdr_idx = None
     for i,ll in enumerate(logical):
-        hits = sum(1 for k in HDR_KW if k in ll["text"].lower())
-        if hits >= 3: hdr_idx = i; break
+        if _fuzzy_hdr_hits(ll["text"]) >= 3 and _looks_like_hdr_row(ll["text"]): hdr_idx = i; break
     if hdr_idx is None:
         warnings.append("OCR: header row not found")
         return pd.DataFrame()
@@ -1311,7 +1354,13 @@ def _ocr_bbox_df(tsv, warnings):
              "debit","credit","withdrawal","deposit","balance","ref","cheque",
              "dr","cr","no","id","amt","amount"}
     for w,x in zip(hl["words"], hl["lefts"]):
-        if w.lower().strip(".:(),/-") in VOCAB:
+        # OCR frequently glues a stray table-border character onto a
+        # header word (e.g. "|Description", "|Value") — strip those too,
+        # not just the original punctuation set, or the token silently
+        # fails the VOCAB check and that column's real identity is lost
+        # (its band then gets mislabeled by whatever neighboring word
+        # *did* survive, e.g. "Ref" absorbing the Description column).
+        if w.lower().strip(".:(),/-|") in VOCAB:
             fw.append(w); fl.append(x)
     if len(fw) < 3:
         fw, fl = hl["words"], hl["lefts"]
@@ -1336,15 +1385,43 @@ def _ocr_bbox_df(tsv, warnings):
         else: seen[nm]=0; deduped.append(nm)
 
     SKIP = ["account holder","ifsc","statement period","page"]
+    # A real transaction row's date cell contains at least a day-month
+    # fragment ("06-05-", "25-03-2025", ...). Wrapped continuation
+    # fragments — a bare year ("2025"), a lone trailing "R" from a
+    # split "...CR" balance, leftover narration text like "SIWAN" — never
+    # match this, and were previously being emitted as their own
+    # (garbage) rows instead of being folded back into the transaction
+    # they belong to.
+    ROW_START_RE = re.compile(r'\d{1,2}[-/.]\d{1,2}')
+
+    def _looks_like_row_start(cells):
+        # date-ish info can land in either of the first couple of bands
+        # depending on how "Txn Date" / "Value Date" got split by OCR
+        head = " ".join(cells[:2])
+        return bool(ROW_START_RE.search(head))
+
     rows = []
+    current = None
     for ll in logical[hdr_idx+1:]:
-        if not ll["text"].strip() or len(ll["text"]) < 8: continue
+        if not ll["text"].strip() or len(ll["text"]) < 4: continue
         if any(k in ll["text"].lower() for k in SKIP): continue
         cells = [""]*n
         for w,x in zip(ll["words"],ll["lefts"]):
             cells[_ac(x)] = (cells[_ac(x)]+" "+w).strip()
-        if sum(1 for c in cells if c.strip()) >= 3:
-            rows.append(cells)
+        if not any(c.strip() for c in cells):
+            continue
+        if _looks_like_row_start(cells) or current is None:
+            if current is not None:
+                rows.append(current)
+            current = cells
+        else:
+            # Continuation of the previous row: fold each non-empty cell
+            # into the corresponding column instead of starting a new row.
+            for i, c in enumerate(cells):
+                if c.strip():
+                    current[i] = (current[i] + " " + c).strip() if current[i] else c
+    if current is not None:
+        rows.append(current)
     if not rows:
         warnings.append("OCR: header found but no data rows")
         return pd.DataFrame()

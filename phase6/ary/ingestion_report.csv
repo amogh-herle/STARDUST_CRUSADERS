@@ -1,0 +1,2 @@
+file,extension,bank_detected,rows_parsed,rows_after_clean,parse_warnings,status
+aryan_statement.pdf,.pdf,,0,0,No tables — trying text fallbacks | PDF: all fallbacks failed,empty
