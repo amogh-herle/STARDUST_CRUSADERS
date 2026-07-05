@@ -36,7 +36,7 @@ if "postgresql" in db_url:
             backend_dir = os.path.dirname(os.path.abspath(__file__))
             db_path = os.path.join(backend_dir, "cidecode.db")
             db_url = f"sqlite+aiosqlite:///{db_path}"
-            print(f"⚠ PostgreSQL not running on localhost:5432. Falling back to SQLite: {db_path}")
+            print(f"[WARNING] PostgreSQL not running on localhost:5432. Falling back to SQLite: {db_path}")
 
 engine_kwargs = {
     "pool_pre_ping": True,

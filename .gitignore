@@ -123,3 +123,5 @@ backend/uploads/
 *.db
 *.pkl
 *.pdf
+figma_frontend/bank-statement-dashboard/.next/dev/lock
+figma_frontend/bank-statement-dashboard/.next/dev/lock

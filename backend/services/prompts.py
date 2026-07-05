@@ -100,3 +100,12 @@ TONE
     4. Anything the report flags as needing human follow-up.
     5. A closing offer to go deeper on any specific account, ring, or pattern.
     """
+
+MAX_CONTEXT_WORDS = 3000
+
+QUESTION_PROMPT_TEMPLATE = """Use the following RAG context to answer the question. Answer using only the analytics artifacts cited above.
+Context:
+{context}
+
+Question: {question}
+Answer:"""

@@ -133,6 +133,9 @@ async def upload_statements(
     # Bulk load into PostgreSQL and sync analytics
     rows_loaded, banks_detected = await _load_into_db(cleaned_path, analytics_out, db)
 
+    # Automatically generate graph.json files from the newly uploaded transaction dataset
+    _generate_frontend_graph(cleaned_path)
+
     return UploadResponse(
         upload_id=upload_id,
         files_received=len(files),
@@ -276,3 +279,61 @@ async def _load_into_db(
             banks_detected = [b for b in df["bank_name"].unique().tolist() if b]
 
     return rows_loaded, banks_detected
+
+
+def _generate_frontend_graph(cleaned_csv: str):
+    """
+    Generate graph.json from the newly uploaded cleaned CSV file and save it
+    to both aml_model/graph.json and public/graph.json.
+    """
+    import json
+    import sys
+    from pathlib import Path
+    
+    project_root = Path(__file__).resolve().parents[2]
+    aml_model_path = project_root / "aml_model"
+    
+    # Target file paths
+    aml_graph_path = aml_model_path / "graph.json"
+    public_graph_path = project_root / "figma_frontend" / "bank-statement-dashboard" / "public" / "graph.json"
+    
+    if str(aml_model_path) not in sys.path:
+        sys.path.append(str(aml_model_path))
+        
+    try:
+        import importlib.util
+        gb_path = aml_model_path / "graph" / "graph_builder.py"
+        spec = importlib.util.spec_from_file_location("graph_builder", str(gb_path))
+        graph_builder_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(graph_builder_module)
+        GraphBuilder = graph_builder_module.GraphBuilder
+        
+        builder = GraphBuilder(cleaned_csv)
+        
+        # Seed with all primary accounts detected in statement
+        seeds = builder.raw_df["account_id"].dropna().unique().tolist()
+        if seeds:
+            graph_data = builder.build_incremental_subgraph(
+                seed=seeds,
+                min_amount=0,
+                max_hops=1,
+                incremental_threshold=30,
+            )
+            
+            # Create directories if they do not exist
+            os.makedirs(os.path.dirname(aml_graph_path), exist_ok=True)
+            os.makedirs(os.path.dirname(public_graph_path), exist_ok=True)
+
+            # Write to aml_model/graph.json
+            with open(aml_graph_path, "w", encoding="utf-8") as f:
+                json.dump(graph_data, f, indent=4)
+                
+            # Write to public/graph.json
+            with open(public_graph_path, "w", encoding="utf-8") as f:
+                json.dump(graph_data, f, indent=4)
+                
+            print(f"[Graph Generation] Successfully built graph from cleaned CSV. Saved to {public_graph_path}")
+        else:
+            print("[Graph Generation] No seed accounts found in uploaded CSV.")
+    except Exception as e:
+        print(f"[Graph Generation] Failed to generate graph: {e}")

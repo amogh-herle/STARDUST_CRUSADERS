@@ -43,6 +43,17 @@ class GraphBuilder:
         self.raw_df = self._load(csv_path)
         # Per-account total transaction count — used for incremental expansion decisions
         self.account_txn_counts = self.raw_df["account_id"].value_counts().to_dict()
+        # account_id -> holder name (for known/uploaded accounts; counterparty
+        # pseudo-nodes won't have an entry here, which is fine — they display
+        # their node id as the label instead)
+        self._account_holder_map = self._build_holder_map(self.raw_df)
+        # Full per-account dashboard stats, computed once and cached
+        self._account_summary_cache: dict = {}
+
+    def _build_holder_map(self, df: pd.DataFrame) -> dict:
+        holder_col = df[["account_id", "account_holder"]].dropna(subset=["account_holder"])
+        holder_col = holder_col[holder_col["account_holder"].astype(str).str.strip() != ""]
+        return holder_col.drop_duplicates("account_id").set_index("account_id")["account_holder"].to_dict()
 
     # ── loading ──────────────────────────────────────────────────────────────
 
@@ -83,6 +94,12 @@ class GraphBuilder:
             df["anomaly_score"] = 0.0
 
         df["narration"] = df.get("narration", "").fillna("")
+        df["channel"] = df.get("channel", "").fillna("") if "channel" in df.columns else ""
+        df["transaction_id"] = df.get("transaction_id", "") if "transaction_id" in df.columns else ""
+        df["account_holder"] = df.get("account_holder", "") if "account_holder" in df.columns else ""
+        df["bank_name"] = df.get("bank_name", "") if "bank_name" in df.columns else ""
+        df["balance"] = pd.to_numeric(df.get("balance_clean", df.get("balance", None)), errors="coerce") \
+                         if ("balance_clean" in df.columns or "balance" in df.columns) else None
 
         # ── FALLBACK: when counterparty_account is missing/empty, derive a
         # pseudo-counterparty node from the narration text itself. Real bank
@@ -120,17 +137,40 @@ class GraphBuilder:
 
         text = str(narration).strip().upper()
 
-        # Common bank narration patterns: IMPS-<ref>-<NAME>-<IFSC>...
-        # or UPI/<ref>/CR|DR/<NAME>/<bank>/...
+        # Common bank narration patterns:
+        #   IMPS-<ref>-<NAME>-<IFSC>...
+        #   UPI/<ref>/CR|DR/<NAME>/<bank>/...
+        #   UPIAR/<ref>/DR/<NAME>/<bank>/<vpa>   (UPIAR = UPI outward channel code)
+        #   UPIAB/<ref>/CR/<NAME>/<bank>/<vpa>   (UPIAB = UPI inward channel code)
         parts = re.split(r"[-/]", text)
         parts = [p.strip() for p in parts if p.strip()]
 
+        # Channel/transaction-type tokens to ALWAYS skip — these are bank
+        # codes, never the counterparty's identity, regardless of position.
+        SKIP_TOKENS = {
+            "CR", "DR", "IMPS", "UPI", "UPIAR", "UPIAB", "UPIAC", "UPICR", "UPIDR",
+            "NEFT", "RTGS", "TRANSFER", "PAYMENT", "ANN", "FEE", "INT", "PD",
+            "CHARGES", "SC", "GST", "FT", "OTHER", "CHEQUE", "SMS", "QTR",
+        }
+
         # Prefer a part that looks like a name (letters/spaces, not a pure
-        # number/reference code, length 3-40)
-        for p in parts:
+        # number/reference code, length 3-40), skipping known channel codes
+        # and skipping the FIRST token entirely (it's almost always the
+        # channel code even if it happens to pass the regex, e.g. "UPIAR").
+        for i, p in enumerate(parts):
+            if i == 0:
+                continue  # first token is the channel/transaction-type code
+            if p in SKIP_TOKENS:
+                continue
             if re.fullmatch(r"[A-Z .]{3,40}", p) and not p.isdigit():
-                if p not in {"CR", "DR", "IMPS", "UPI", "NEFT", "RTGS", "TRANSFER", "PAYMENT"}:
-                    return p
+                return p.strip()
+
+        # Nothing structured found after skipping channel codes — fall back
+        # to a short hash-stable slice of the FULL narration (excluding the
+        # leading channel code + numeric reference) so at least similar
+        # transactions to the same unknown party still group together.
+        remainder = "-".join(parts[2:]) if len(parts) > 2 else text
+        return remainder[:30] if remainder else "UNKNOWN"
 
         # Nothing structured found — use a short hash-stable slice of the
         # narration so the SAME narration always maps to the SAME node
@@ -168,9 +208,12 @@ class GraphBuilder:
                 row["account_id"], row["counterparty_account"],
                 amount=float(row["debit"]),
                 narration=str(row.get("narration", ""))[:80],
+                channel=str(row.get("channel", "")),
+                transaction_id=str(row.get("transaction_id", "")),
                 datetime=str(row["datetime"]),
                 is_flagged=int(row["is_flagged"]),
                 anomaly_score=float(row["anomaly_score"]),
+                direction="debit",
             )
 
         incoming = df[(df["credit"] > 0) & (df["debit"] == 0)]
@@ -179,9 +222,12 @@ class GraphBuilder:
                 row["counterparty_account"], row["account_id"],
                 amount=float(row["credit"]),
                 narration=str(row.get("narration", ""))[:80],
+                channel=str(row.get("channel", "")),
+                transaction_id=str(row.get("transaction_id", "")),
                 datetime=str(row["datetime"]),
                 is_flagged=int(row["is_flagged"]),
                 anomaly_score=float(row["anomaly_score"]),
+                direction="credit",
             )
 
         return G
@@ -190,7 +236,7 @@ class GraphBuilder:
 
     def build_incremental_subgraph(
         self,
-        seed: str,
+        seed,   # str OR list[str] — pass all uploaded account_ids to seed the initial view
         min_amount: float = 0,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
@@ -199,24 +245,31 @@ class GraphBuilder:
         max_nodes: int = 200,
     ) -> dict:
         """
-        Starts from `seed` and expands outward. A node is only expanded
-        (its own neighbors pulled in) if account_txn_counts[node] > threshold.
-        Nodes at or below the threshold are still SHOWN (as leaves) but not
-        expanded further — this is the "click to build incremental graph"
-        behaviour: low-activity accounts terminate the branch, high-activity
-        ("significant") accounts keep growing the graph.
+        Starts from one or more `seed` accounts (e.g. every account_id from
+        the uploaded statements) and expands outward. A node is only
+        expanded (its own neighbors pulled in) if account_txn_counts[node]
+        > threshold. Nodes at or below the threshold are still SHOWN (as
+        leaves) but not expanded further.
+
+        Passing a LIST of seeds means the initial graph shows ALL of them
+        as nodes immediately — this is the "I uploaded 5 statements, show
+        me 5 nodes to start" workflow.
 
         Returns {"nodes": [...], "edges": [...], "meta": {...}} — ready to
         JSON-serialize straight to the Next.js frontend.
         """
+        seeds = [seed] if isinstance(seed, str) else list(seed)
+
         df = self.filtered_df(min_amount, date_from, date_to)
         full_graph = self._build_graph(df)
 
-        if seed not in full_graph:
-            return {"nodes": [], "edges": [], "meta": {"error": f"'{seed}' not found in filtered data"}}
+        valid_seeds = [s for s in seeds if s in full_graph]
+        if not valid_seeds:
+            return {"nodes": [], "edges": [],
+                    "meta": {"error": f"None of the seed account(s) {seeds} found in filtered data"}}
 
-        visited = {seed}
-        frontier = [seed]
+        visited = set(valid_seeds)
+        frontier = list(valid_seeds)
         expanded_nodes = set()
 
         for _ in range(max_hops):
@@ -224,8 +277,10 @@ class GraphBuilder:
             for node in frontier:
                 txn_count = self.account_txn_counts.get(node, 0)
 
-                # Only expand this node's neighbors if it crosses the significance threshold
-                if txn_count <= incremental_threshold and node != seed:
+                # Uploaded/known seed accounts always expand at least once,
+                # regardless of transaction count, so their counterparties
+                # show up immediately in the initial view.
+                if txn_count <= incremental_threshold and node not in valid_seeds:
                     continue  # leaf — shown, but not expanded further
 
                 expanded_nodes.add(node)
@@ -241,7 +296,7 @@ class GraphBuilder:
                 break
 
         subgraph = full_graph.subgraph(visited).copy()
-        return self._to_json(subgraph, expanded_nodes, incremental_threshold)
+        return self._to_json(subgraph, expanded_nodes, incremental_threshold, known_accounts=set(valid_seeds))
 
     # ── expand a single node on demand (the "click node to expand" action) ──
 
@@ -268,9 +323,112 @@ class GraphBuilder:
         induced = full_graph.subgraph({node} | neighbors).copy()
         return self._to_json(induced, expanded_nodes={node}, threshold=None)
 
+    # ── NODE CLICK: full account dashboard (holder, risk, activity summary) ─
+
+    def get_account_dashboard(self, account_id: str) -> dict:
+        """
+        Returns everything needed for the side-panel dashboard when an
+        investigator clicks a node: holder identity, risk profile, and
+        activity summary. Works for both known/uploaded accounts (has a
+        holder name) and counterparty/pseudo accounts (holder name is None).
+        """
+        if account_id in self._account_summary_cache:
+            return self._account_summary_cache[account_id]
+
+        df = self.raw_df[self.raw_df["account_id"] == account_id]
+
+        # Also gather this account's role as a COUNTERPARTY across the
+        # dataset (money it received/sent as someone else's counterparty),
+        # in case it's a pseudo-node with no rows of its own.
+        as_counterparty = self.raw_df[self.raw_df["counterparty_account"] == account_id]
+
+        if df.empty and as_counterparty.empty:
+            return {"error": f"Account '{account_id}' not found"}
+
+        total_txns = len(df)
+        flagged_txns = int(df["is_flagged"].sum()) if total_txns else 0
+        flag_pct = round(flagged_txns / total_txns * 100, 1) if total_txns else 0.0
+        avg_score = round(df["anomaly_score"].mean(), 4) if total_txns else 0.0
+        max_score = round(df["anomaly_score"].max(), 4) if total_txns else 0.0
+
+        total_debit = round(df["debit"].sum(), 2) if total_txns else 0.0
+        total_credit = round(df["credit"].sum(), 2) if total_txns else 0.0
+
+        holder = self._account_holder_map.get(account_id)
+        bank_name = df["bank_name"].dropna().iloc[0] if total_txns and df["bank_name"].notna().any() else None
+
+        date_min = df["datetime"].min() if total_txns else None
+        date_max = df["datetime"].max() if total_txns else None
+
+        # Risk tier label, mirroring the model's own tiering scheme
+        if flag_pct >= 80: risk_tier = "Critical"
+        elif flag_pct >= 65: risk_tier = "High"
+        elif flag_pct >= 50: risk_tier = "Medium"
+        elif flag_pct >= 30: risk_tier = "Low"
+        else: risk_tier = "Very Low"
+
+        result = {
+            "account_id": account_id,
+            "account_holder": holder,
+            "bank_name": bank_name,
+            "is_known_account": holder is not None,
+            "total_transactions": total_txns,
+            "flagged_transactions": flagged_txns,
+            "flag_pct": flag_pct,
+            "risk_tier": risk_tier,
+            "avg_anomaly_score": avg_score,
+            "max_anomaly_score": max_score,
+            "total_debit": total_debit,
+            "total_credit": total_credit,
+            "net_flow": round(total_credit - total_debit, 2),
+            "activity_date_from": str(date_min) if date_min is not None else None,
+            "activity_date_to": str(date_max) if date_max is not None else None,
+            "appears_as_counterparty_count": len(as_counterparty),
+        }
+        self._account_summary_cache[account_id] = result
+        return result
+
+    # ── EDGE CLICK: full transaction detail (mode, amount, narration, date) ─
+
+    def get_transaction_detail(self, source: str, target: str, transaction_id: str = None) -> list:
+        """
+        Returns the underlying transaction row(s) for a clicked edge —
+        mode of transaction, exact amount, narration, date, flag status.
+        If transaction_id is given, returns just that one row; otherwise
+        returns all transactions that produced an edge between source/target.
+        """
+        df = self.raw_df
+
+        if transaction_id:
+            match = df[df.get("transaction_id", "") == transaction_id]
+        else:
+            match = df[
+                ((df["account_id"] == source) & (df["counterparty_account"] == target)) |
+                ((df["account_id"] == target) & (df["counterparty_account"] == source))
+            ]
+
+        results = []
+        for _, row in match.iterrows():
+            results.append({
+                "transaction_id": row.get("transaction_id", ""),
+                "account_id": row["account_id"],
+                "counterparty_account": row["counterparty_account"],
+                "mode": row.get("channel", "") or "UNKNOWN",
+                "amount": round(float(row["debit"] if row["debit"] > 0 else row["credit"]), 2),
+                "direction": "debit" if row["debit"] > 0 else "credit",
+                "narration": row.get("narration", ""),
+                "datetime": str(row["datetime"]),
+                "is_flagged": int(row["is_flagged"]),
+                "anomaly_score": round(float(row["anomaly_score"]), 4),
+                "balance_after": round(float(row["balance"]), 2) if pd.notna(row.get("balance")) else None,
+            })
+        return results
+
     # ── convert a networkx graph into clean JSON for the frontend ───────────
 
-    def _to_json(self, G: nx.MultiDiGraph, expanded_nodes: set, threshold: Optional[int]) -> dict:
+    def _to_json(self, G: nx.MultiDiGraph, expanded_nodes: set, threshold: Optional[int],
+                 known_accounts: Optional[set] = None) -> dict:
+        known_accounts = known_accounts or set()
         nodes = []
         for n in G.nodes():
             txn_count = self.account_txn_counts.get(n, 0)
@@ -283,9 +441,17 @@ class GraphBuilder:
                    "source" if (G.out_degree(n) > 0 and G.in_degree(n) == 0) else \
                    "intermediary" if (G.in_degree(n) > 0 and G.out_degree(n) > 0) else "isolated"
 
+            holder_name = self._account_holder_map.get(n)
+            is_known = n in known_accounts
+
             nodes.append({
                 "id": n,
-                "label": n,
+                # Show the real holder's name on the node label when we have
+                # one (uploaded/known accounts) — falls back to the raw id
+                # for counterparty/pseudo nodes without a holder on file.
+                "label": holder_name if holder_name else n,
+                "account_holder": holder_name,
+                "is_known_account": is_known,   # True = one of the uploaded statement accounts
                 "role": role,
                 "total_transactions": txn_count,
                 "is_expanded": n in expanded_nodes,
@@ -304,8 +470,11 @@ class GraphBuilder:
                 "source": u,
                 "target": v,
                 "amount": round(d["amount"], 2),
+                "mode": d.get("channel", "") or "UNKNOWN",   # e.g. UPI / NEFT / IMPS / RTGS
+                "transaction_id": d.get("transaction_id", ""),
                 "narration": d.get("narration", ""),
                 "datetime": d.get("datetime", ""),
+                "direction": d.get("direction", ""),
                 "is_flagged": d.get("is_flagged", 0),
                 "anomaly_score": round(d.get("anomaly_score", 0), 4),
             })

@@ -130,9 +130,17 @@ export default function ReportView({
 
   // Incremental / Overview graph states
   const [isOverviewMode, setIsOverviewMode] = useState(true);
+  const [dayOffset, setDayOffset] = useState<number>(30);
+  const [targetDateStr, setTargetDateStr] = useState<string>("");
   const [totalTxnCount, setTotalTxnCount] = useState<number>(0);
   const [minAmount, setMinAmount] = useState<number>(0);
-  const [minDateIndex, setMinDateIndex] = useState<number>(0);
+
+  // New AML Filter states for the dashboard Graph View
+  const [searchQuery, setSearchQuery] = useState("");
+  const [minAnomalyScore, setMinAnomalyScore] = useState(0);
+  const [selectedRiskTiers, setSelectedRiskTiers] = useState<string[]>([]);
+  const [selectedModes, setSelectedModes] = useState<string[]>([]);
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
 
   const handleHighlightNode = (nodeId: string) => {
     if (cyInstance.current) {
@@ -171,6 +179,18 @@ export default function ReportView({
       });
   }, [selectedNodeData]);
 
+  // Auto-set target date when entering isolated mode
+  useEffect(() => {
+    if (!isOverviewMode && selectedAccountId && graphData && !targetDateStr) {
+      const edges = (graphData as any).edges || [];
+      const nodeEdges = edges.filter((e: any) => String(e.source) === String(selectedAccountId) || String(e.target) === String(selectedAccountId));
+      const dates = Array.from(new Set(nodeEdges.map((e: any) => e.datetime ? e.datetime.split(" ")[0] : (e.dates && e.dates[0]) || "").filter(Boolean))).sort();
+      if (dates.length > 0) {
+        setTargetDateStr(dates[0] as string);
+      }
+    }
+  }, [isOverviewMode, selectedAccountId, graphData, targetDateStr]);
+
   // Load analytics on mount
   useEffect(() => {
     setLoading(true);
@@ -189,141 +209,230 @@ export default function ReportView({
     }
   }, [analytics, selectedAccountId]);
 
-  // Load overview graph or ledger trace depending on mode
+  // Load static graph.json when graph tab is active
   useEffect(() => {
     if (activeSubView !== "graph") return;
 
-    if (isOverviewMode) {
-      setGraphLoading(true);
-      getFullGraph(10)
-        .then((data) => {
-          setGraphData(data);
-        })
-        .catch((err) => {
-          console.error("Failed to load overview graph:", err);
-        })
-        .finally(() => {
-          setGraphLoading(false);
+    setGraphLoading(true);
+    fetch("/graph.json")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load graph.json from public assets");
+        return res.json();
+      })
+      .then((data: any) => {
+        if (!data || !data.nodes || !data.edges) {
+          throw new Error("Invalid graph data structure in graph.json");
+        }
+        
+        // Normalize nodes
+        const normalizedNodes = data.nodes.map((n: any) => {
+          const base = n.data ? { ...n.data, ...n } : n;
+          return {
+            id: String(base.id || ""),
+            label: base.label || base.id || "",
+            account_holder: base.account_holder,
+            is_known_account: base.is_known_account === true || base.is_known_account === "true",
+            role: base.role,
+            total_transactions: base.total_transactions !== undefined ? Number(base.total_transactions) : undefined,
+            is_expanded: base.is_expanded,
+            is_expandable: base.is_expandable,
+            total_received: base.total_received !== undefined ? Number(base.total_received) : undefined,
+            total_forwarded: base.total_forwarded !== undefined ? Number(base.total_forwarded) : undefined,
+            max_anomaly_score: base.max_anomaly_score !== undefined ? Number(base.max_anomaly_score) : undefined,
+            in_degree: base.in_degree !== undefined ? Number(base.in_degree) : undefined,
+            out_degree: base.out_degree !== undefined ? Number(base.out_degree) : undefined,
+            risk_score: base.risk_score !== undefined ? Number(base.risk_score) : undefined,
+            risk_tier: base.risk_tier,
+            bank_name: base.bank_name || base.bank || "",
+          };
         });
-    } else if (selectedAccountId) {
-      setGraphLoading(true);
-      setSelectedNodeData(null);
-      getLedgerTrace(selectedAccountId)
-        .then((data) => {
-          setGraphData(data);
-          setMinAmount(0);
-          setMinDateIndex(0);
-        })
-        .catch((err) => {
-          console.error("Failed to load ledger trace:", err);
-        })
-        .finally(() => {
-          setGraphLoading(false);
-        });
-    }
-  }, [activeSubView, isOverviewMode, selectedAccountId]);
 
-  // Compute filtered elements if in EGO mode and totalTxnCount < 30
+        // Normalize edges
+        const normalizedEdges = data.edges.map((e: any) => {
+          const base = e.data ? { ...e.data, ...e } : e;
+          return {
+            id: String(base.id || ""),
+            source: String(base.source || ""),
+            target: String(base.target || ""),
+            amount: Number(base.amount || 0),
+            mode: base.mode || base.channel || "",
+            transaction_id: base.transaction_id,
+            narration: base.narration,
+            datetime: base.datetime || (base.dates && base.dates[0]) || "",
+            direction: base.direction,
+            is_flagged: base.is_flagged !== undefined ? Number(base.is_flagged) : (base.risk_flag === "SUSPICIOUS" ? 1 : 0),
+            anomaly_score: base.anomaly_score !== undefined ? Number(base.anomaly_score) : undefined,
+          };
+        });
+
+        setGraphData({ nodes: normalizedNodes, edges: normalizedEdges } as any);
+      })
+      .catch((err) => {
+        console.error("Failed to load overview graph:", err);
+      })
+      .finally(() => {
+        setGraphLoading(false);
+      });
+  }, [activeSubView]);
+
+  // Compute filtered elements
   const filteredElements = useMemo(() => {
     if (!graphData) return [];
 
-    // If in overview mode or txn count >= 30, show all elements
-    if (isOverviewMode || totalTxnCount >= 30) {
+    const nodes = (graphData as any).nodes || [];
+    let edges = (graphData as any).edges || [];
+
+    if (isOverviewMode) {
+      // Overview Mode: Only show seed nodes, no edges
+      const seedNodes = nodes.filter((n: any) => n.is_known_account);
       const elements: cytoscape.ElementDefinition[] = [];
-      graphData.nodes.forEach((n) => {
+      seedNodes.forEach((n: any) => {
         elements.push({
           group: "nodes",
           data: {
-            id: n.data.id,
-            label: n.data.label,
-            bank: n.data.bank,
-            risk_score: n.data.risk_score,
-            risk_tier: n.data.risk_tier,
-            role: n.data.role,
-            is_seed: n.data.is_seed || n.data.id === selectedAccountId,
-            is_internal: n.data.is_internal,
-          },
-        });
-      });
-      graphData.edges.forEach((e) => {
-        elements.push({
-          group: "edges",
-          data: {
-            id: e.data.id,
-            source: e.data.source,
-            target: e.data.target,
-            amount: e.data.amount,
-            dates: e.data.dates,
-            risk_flag: e.data.risk_flag,
-          },
+            id: String(n.id),
+            label: n.label || n.id,
+            account_holder: n.account_holder,
+            is_known_account: n.is_known_account,
+            role: n.role,
+            total_transactions: n.total_transactions,
+            total_received: n.total_received,
+            total_forwarded: n.total_forwarded,
+            max_anomaly_score: n.max_anomaly_score,
+            in_degree: n.in_degree,
+            out_degree: n.out_degree,
+            risk_score: n.risk_score || 0,
+            risk_tier: n.risk_tier || "LOW",
+            bank_name: n.bank_name || "",
+            bank: n.bank_name || "",
+            is_seed: n.is_known_account,
+            is_internal: n.role !== "source" && n.role !== "destination",
+          }
         });
       });
       return elements;
     }
 
-    // Otherwise (ego mode with < 30 txns), apply amount and date filters!
-    const allDates = Array.from(
-      new Set(graphData.edges.flatMap((e) => e.data.dates || []))
-    ).sort();
-    const minDateStr = allDates[minDateIndex] || "";
-
-    // Filter edges
-    const keptEdges = graphData.edges.filter((e) => {
-      if (e.data.amount < minAmount) return false;
-      if (minDateStr) {
-        const edgeDates = e.data.dates || [];
-        const hasMatchingDate = edgeDates.some((d) => d >= minDateStr);
-        if (!hasMatchingDate) return false;
+    // Isolated Mode: Focus on selectedAccountId
+    if (selectedAccountId) {
+      edges = edges.filter((e: any) => String(e.source) === String(selectedAccountId) || String(e.target) === String(selectedAccountId));
+      
+      // Temporal Filtering
+      if (targetDateStr) {
+        const targetTime = new Date(targetDateStr).getTime();
+        const offsetMs = dayOffset * 24 * 60 * 60 * 1000;
+        const minTime = targetTime - offsetMs;
+        const maxTime = targetTime + offsetMs;
+        
+        edges = edges.filter((e: any) => {
+          const edgeDateStr = e.datetime ? e.datetime.split(" ")[0] : (e.dates && e.dates[0]) || "";
+          if (!edgeDateStr) return true; // Keep if no date available
+          const t = new Date(edgeDateStr).getTime();
+          return t >= minTime && t <= maxTime;
+        });
       }
+    }
+
+    // Filter edges by amount, anomaly, mode, flags
+    const filteredEdges = edges.filter((e: any) => {
+      if (e.amount < minAmount) return false;
+      if (flaggedOnly && e.is_flagged !== 1) return false;
+      if (e.anomaly_score !== undefined && e.anomaly_score < minAnomalyScore) return false;
+      if (selectedModes.length > 0 && e.mode && !selectedModes.includes(e.mode)) return false;
       return true;
     });
 
     // Collect active node IDs
-    const activeNodeIds = new Set<string>();
-    if (selectedAccountId) {
-      activeNodeIds.add(selectedAccountId);
-    }
-    keptEdges.forEach((e) => {
-      activeNodeIds.add(e.data.source);
-      activeNodeIds.add(e.data.target);
+    const connectedNodeIds = new Set<string>();
+    filteredEdges.forEach((e: any) => {
+      connectedNodeIds.add(String(e.source));
+      connectedNodeIds.add(String(e.target));
     });
 
-    // Construct elements
-    const elements: cytoscape.ElementDefinition[] = [];
-    graphData.nodes.forEach((n) => {
-      if (activeNodeIds.has(n.data.id)) {
-        elements.push({
-          group: "nodes",
-          data: {
-            id: n.data.id,
-            label: n.data.label,
-            bank: n.data.bank,
-            risk_score: n.data.risk_score,
-            risk_tier: n.data.risk_tier,
-            role: n.data.role,
-            is_seed: n.data.is_seed || n.data.id === selectedAccountId,
-            is_internal: n.data.is_internal,
-          },
-        });
+    // Filter nodes
+    const filteredNodes = nodes.filter((n: any) => {
+      // Risk Tier filter
+      if (
+        selectedRiskTiers.length > 0 &&
+        n.risk_tier &&
+        !selectedRiskTiers.includes(n.risk_tier.toUpperCase())
+      ) {
+        return false;
       }
+
+      // Search Query filter
+      if (searchQuery.trim() !== "") {
+        const query = searchQuery.toLowerCase();
+        const idMatch = String(n.id).toLowerCase().includes(query);
+        const holderMatch = n.account_holder?.toLowerCase().includes(query);
+        const bankMatch = n.bank_name?.toLowerCase().includes(query);
+        return idMatch || holderMatch || bankMatch;
+      }
+
+      // Always include the selected account node in isolated mode, even if no edges match
+      if (String(n.id) === String(selectedAccountId)) return true;
+
+      return connectedNodeIds.has(String(n.id));
     });
 
-    keptEdges.forEach((e) => {
+    const finalNodeIds = new Set(filteredNodes.map((n: any) => String(n.id)));
+    const finalEdges = filteredEdges.filter(
+      (e: any) => e.source && e.target && finalNodeIds.has(String(e.source)) && finalNodeIds.has(String(e.target))
+    );
+
+    // Format elements with nested "data" property for Cytoscape compatibility
+    const elements: cytoscape.ElementDefinition[] = [];
+    
+    filteredNodes.forEach((n: any) => {
+      elements.push({
+        group: "nodes",
+        data: {
+          id: String(n.id),
+          label: n.label || n.id,
+          account_holder: n.account_holder,
+          is_known_account: n.is_known_account,
+          role: n.role,
+          total_transactions: n.total_transactions,
+          total_received: n.total_received,
+          total_forwarded: n.total_forwarded,
+          max_anomaly_score: n.max_anomaly_score,
+          in_degree: n.in_degree,
+          out_degree: n.out_degree,
+          risk_score: n.risk_score || 0,
+          risk_tier: n.risk_tier || "LOW",
+          bank_name: n.bank_name || "",
+          // Compatibility keys for previous styling/inspector
+          bank: n.bank_name || "",
+          is_seed: n.is_known_account,
+          is_internal: n.role !== "source" && n.role !== "destination",
+        }
+      });
+    });
+
+    finalEdges.forEach((e: any) => {
       elements.push({
         group: "edges",
         data: {
-          id: e.data.id,
-          source: e.data.source,
-          target: e.data.target,
-          amount: e.data.amount,
-          dates: e.data.dates,
-          risk_flag: e.data.risk_flag,
-        },
+          id: String(e.id),
+          source: String(e.source),
+          target: String(e.target),
+          amount: Number(e.amount || 0),
+          mode: e.mode || "",
+          transaction_id: e.transaction_id || "",
+          narration: e.narration || "",
+          datetime: e.datetime || "",
+          direction: e.direction || "",
+          is_flagged: e.is_flagged,
+          anomaly_score: e.anomaly_score,
+          // Compatibility keys for previous styling/inspector
+          dates: [e.datetime ? e.datetime.split(" ")[0] : ""],
+          risk_flag: e.is_flagged === 1 ? "SUSPICIOUS" : "NORMAL",
+        }
       });
     });
 
     return elements;
-  }, [graphData, isOverviewMode, totalTxnCount, minAmount, minDateIndex, selectedAccountId]);
+  }, [graphData, minAmount, minAnomalyScore, searchQuery, selectedRiskTiers, selectedModes, flaggedOnly, isOverviewMode, selectedAccountId, targetDateStr, dayOffset]);
 
   // Re-run layout if layout name changes
   useEffect(() => {
@@ -360,25 +469,25 @@ export default function ReportView({
           style: {
             "label": (node: any) => {
               const lbl = node.data("label") || node.data("id");
-              return lbl.length > 12 ? lbl.substring(0, 10) + "..." : lbl;
+              return lbl.length > 15 ? lbl.substring(0, 13) + "..." : lbl;
             },
-            "width": (node: any) => (isOverviewMode ? 46 : (node.data("is_seed") ? 42 : 28)),
-            "height": (node: any) => (isOverviewMode ? 46 : (node.data("is_seed") ? 42 : 28)),
+            "width": (node: any) => (node.data("is_seed") ? 42 : 30),
+            "height": (node: any) => (node.data("is_seed") ? 42 : 30),
             "background-color": (node: any) => {
-              if (node.data("is_seed")) return "#3b82f6"; // Vibrant blue seed
-              const tier = node.data("risk_tier");
-              if (tier === "CRITICAL") return "#ef4444"; // Red
+              const tier = String(node.data("risk_tier")).toUpperCase();
+              if (tier === "CRITICAL") return "#f43f5e"; // Rose red
               if (tier === "HIGH") return "#f97316"; // Orange
               if (tier === "MEDIUM") return "#eab308"; // Yellow
-              return "#10b981"; // Green
+              return "#10b981"; // Emerald green
             },
-            "color": "#334155",
+            "color": "#f8fafc",
             "font-size": "9px",
-            "font-weight": "bold",
+            "font-family": "Inter, system-ui, sans-serif",
             "text-valign": "bottom",
-            "text-margin-y": 4,
-            "border-width": (node: any) => (isOverviewMode ? 2 : (node.data("is_seed") ? 3 : 1.5)),
+            "text-margin-y": 5,
+            "border-width": (node: any) => (node.data("is_seed") ? 3 : 1.5),
             "border-color": "#ffffff",
+            "border-opacity": 0.8,
             "overlay-padding": "4px",
             "overlay-opacity": 0,
           },
@@ -386,16 +495,17 @@ export default function ReportView({
         {
           selector: "node:selected",
           style: {
-            "border-width": 3,
-            "border-color": "#4f46e5",
+            "border-width": 4,
+            "border-color": "#6366f1",
+            "border-opacity": 1,
           },
         },
         {
           selector: "edge",
           style: {
-            "width": (edge: any) => Math.min(Math.max(Math.log10(edge.data("amount") || 1) * 1.2, 1.5), 5),
-            "line-color": (edge: any) => (edge.data("risk_flag") === "SUSPICIOUS" ? "#f43f5e" : "#64748b"),
-            "target-arrow-color": (edge: any) => (edge.data("risk_flag") === "SUSPICIOUS" ? "#f43f5e" : "#64748b"),
+            "width": (edge: any) => Math.min(Math.max(Math.log10(edge.data("amount") || 1) * 1.5, 1.5), 6),
+            "line-color": (edge: any) => (edge.data("is_flagged") === 1 || edge.data("risk_flag") === "SUSPICIOUS" ? "#f43f5e" : "#475569"),
+            "target-arrow-color": (edge: any) => (edge.data("is_flagged") === 1 || edge.data("risk_flag") === "SUSPICIOUS" ? "#f43f5e" : "#475569"),
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
             "label": (edge: any) => {
@@ -407,25 +517,21 @@ export default function ReportView({
             },
             "font-size": "8px",
             "font-weight": "bold",
-            "color": "#475569",
-            "text-background-opacity": 0.85,
-            "text-background-color": "#ffffff",
-            "text-background-padding": "1.5px",
+            "color": "#94a3b8",
+            "text-background-opacity": 0.9,
+            "text-background-color": "#0f172a",
+            "text-background-padding": "2px",
             "text-background-shape": "roundrectangle",
             "text-rotation": "autorotate",
-            "arrow-scale": 0.8,
+            "arrow-scale": 0.85,
           },
         },
       ],
       layout: {
         name: layoutName,
-        concentric: (node: any) => {
-          if (node.data("is_seed")) return 3;
-          return node.data("risk_tier") === "CRITICAL" || node.data("risk_tier") === "HIGH" ? 2 : 1;
-        },
-        levelWidth: () => 1,
-        padding: 30,
+        padding: 40,
         animate: true,
+        animationDuration: 500,
       } as any,
     });
 
@@ -632,62 +738,48 @@ export default function ReportView({
                 )}
               </>
             )}
-
-            {/* Interactive Money Trail Command Center */}
             {activeSubView === "graph" && (
-              <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 w-full">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                      Interactive Money Trail Command Center
-                      <span className="text-xs font-normal text-slate-500 ml-1">
-                        {isOverviewMode 
-                          ? "— Top 10 Accounts Overview" 
-                          : `— Account ${selectedAccountId} (${totalTxnCount} Txns)`}
-                      </span>
-                    </h3>
+              <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950 p-5 w-full text-slate-100 flex flex-col gap-4 shadow-2xl">
+                {/* Header Section */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Dynamic money flow graph
+                        <span className="text-xs font-normal text-slate-400 ml-1">
+                          — File-based AML visualization sandbox
+                        </span>
+                      </h3>
+                      {!isOverviewMode && (
+                        <button
+                          onClick={() => {
+                            setIsOverviewMode(true);
+                            setSelectedAccountId(null);
+                            setTargetDateStr("");
+                          }}
+                          className="text-[10px] bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-semibold transition-colors flex items-center gap-1"
+                        >
+                          <span>←</span> Back to Overview
+                        </button>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Drill down and trace flow paths by clicking any node in the transaction graph.
+                      Trace flow paths and isolate suspects across all uploaded transaction statements.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    {!isOverviewMode && (
-                      <button
-                        onClick={() => {
-                          setIsOverviewMode(true);
-                          setSelectedAccountId(null);
-                          setSelectedNodeData(null);
-                        }}
-                        className="rounded border border-blue-200 bg-blue-50 hover:bg-blue-100 p-1 px-2.5 text-xs font-semibold text-blue-600 transition-colors mr-1"
-                      >
-                        ← Back to Overview
-                      </button>
-                    )}
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <span>Layout:</span>
-                      <select
-                        value={layoutName}
-                        onChange={(e) => setLayoutName(e.target.value)}
-                        className="rounded border border-slate-200 px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-accent"
-                      >
-                        <option value="concentric">Concentric (Default)</option>
-                        <option value="cose">CoSE (Organic)</option>
-                        <option value="grid">Grid (Clean)</option>
-                        <option value="circle">Circle (Radial)</option>
-                      </select>
-                    </div>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
                       <button
                         onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() * 1.2)}
-                        className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
+                        className="rounded hover:bg-slate-800 p-1 px-2 text-xs font-semibold text-slate-300 transition-colors"
                         title="Zoom In"
                       >
                         ＋
                       </button>
                       <button
                         onClick={() => cyInstance.current?.zoom(cyInstance.current.zoom() / 1.2)}
-                        className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
+                        className="rounded hover:bg-slate-800 p-1 px-2 text-xs font-semibold text-slate-300 transition-colors"
                         title="Zoom Out"
                       >
                         －
@@ -697,7 +789,7 @@ export default function ReportView({
                           cyInstance.current?.fit();
                           cyInstance.current?.center();
                         }}
-                        className="rounded border border-slate-200 bg-white hover:bg-slate-50 p-1 px-2 text-xs font-semibold text-slate-600 transition-colors"
+                        className="rounded hover:bg-slate-800 p-1 px-2 text-xs font-semibold text-slate-300 transition-colors"
                         title="Fit Window"
                       >
                         ⛶
@@ -706,32 +798,83 @@ export default function ReportView({
                   </div>
                 </div>
 
-                {/* Incremental Filter Sliders for < 30 txn accounts */}
-                {!isOverviewMode && totalTxnCount < 30 && graphData && (
-                  <div className="mt-3 mb-2 p-3 bg-slate-50 border border-slate-200 rounded-lg flex flex-col md:flex-row gap-6">
-                    {/* Amount Filter Slider */}
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium text-slate-700">Minimum Transaction Amount</span>
-                        <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                          ₹{minAmount.toLocaleString()}
-                        </span>
+                {/* Main Three-Column Layout */}
+                <div className="flex flex-col lg:flex-row gap-5 min-h-[580px] relative">
+                  
+                  {/* Left Column: Visual Filters */}
+                  <aside className="w-full lg:w-60 shrink-0 bg-slate-900/60 p-4 border border-slate-800 rounded-xl flex flex-col gap-5 overflow-y-auto">
+                    
+                    {/* Temporal Filter (Only in Isolated Mode) */}
+                    {!isOverviewMode && (
+                      <div className="bg-slate-950/50 p-3 rounded-lg border border-slate-800/80 shadow-inner">
+                        <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
+                          <span className="text-xs">⏱</span> Time Filter
+                        </label>
+                        <div className="mb-3">
+                          <label className="text-[9px] font-semibold text-slate-400 block mb-1">Target Date</label>
+                          <input
+                            type="date"
+                            value={targetDateStr}
+                            onChange={(e) => setTargetDateStr(e.target.value)}
+                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-[10px] text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-semibold text-slate-400 flex justify-between mb-1">
+                            <span>Window (+/- Days)</span>
+                            <span className="text-indigo-300 font-bold">{dayOffset}d</span>
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="180"
+                            step="1"
+                            value={dayOffset}
+                            onChange={(e) => setDayOffset(Number(e.target.value))}
+                            className="w-full accent-indigo-500 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[8px] text-slate-500 mt-1">
+                            <span>0</span>
+                            <span>180</span>
+                          </div>
+                        </div>
                       </div>
+                    )}
+
+                    {/* Search */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Search Account</label>
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search ID, Name, Bank..."
+                        className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Min Amount */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Min Amount (₹)</label>
+                      <input
+                        type="number"
+                        value={minAmount}
+                        onChange={(e) => setMinAmount(Number(e.target.value))}
+                        className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs focus:outline-none text-slate-200 mb-1.5"
+                      />
                       <input
                         type="range"
                         min="0"
-                        max={(() => {
-                          const maxAmt = Math.max(...graphData.edges.map(e => e.data.amount || 0), 1000);
-                          return maxAmt;
-                        })()}
-                        step={(() => {
-                          const maxAmt = Math.max(...graphData.edges.map(e => e.data.amount || 0), 1000);
-                          return Math.round(maxAmt / 50) || 10;
-                        })()}
+                        max="25000"
+                        step="500"
                         value={minAmount}
                         onChange={(e) => setMinAmount(Number(e.target.value))}
-                        className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        className="w-full accent-indigo-500"
                       />
+                      <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+                        <span>₹0</span>
+                        <span>₹25,000</span>
+                      </div>
                     </div>
 
                     {/* Date Filter Slider */}
@@ -780,82 +923,210 @@ export default function ReportView({
                         Traced fund propagation…
                       </div>
                     </div>
-                  )}
 
-                  {/* Legend Overlay */}
-                  <div className="absolute bottom-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-lg p-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-slate-400 z-10 pointer-events-none">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-blue-500 border border-white inline-block" />
-                      <span className="font-semibold text-slate-300">Seed Subject</span>
+                    {/* Risk Tier */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Risk Level</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["CRITICAL", "HIGH", "MEDIUM", "LOW"].map((tier) => {
+                          const isSelected = selectedRiskTiers.includes(tier);
+                          return (
+                            <button
+                              key={tier}
+                              onClick={() =>
+                                setSelectedRiskTiers((prev) =>
+                                  prev.includes(tier) ? prev.filter((t) => t !== tier) : [...prev, tier]
+                                )
+                              }
+                              className={`rounded px-2 py-0.5 text-[9px] font-medium transition-all ${
+                                isSelected
+                                  ? "bg-indigo-600 text-white"
+                                  : "bg-slate-950 border border-slate-800 text-slate-400 hover:bg-slate-900"
+                              }`}
+                            >
+                              {tier}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block" />
-                      <span>Critical Risk</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-orange-500 inline-block" />
-                      <span>High Risk</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-yellow-500 inline-block" />
-                      <span>Medium Risk</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-green-500 inline-block" />
-                      <span>Clean / Source</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 border-l border-slate-800 pl-4">
-                      <span className="h-[2px] w-5 bg-slate-500 inline-block" />
-                      <span>Normal Transaction</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-[2px] w-5 bg-red-500 inline-block" />
-                      <span className="text-red-400 font-semibold">Suspicious Transaction</span>
-                    </div>
-                  </div>
-                </div>
 
-                {/* Account details and transaction history (Right column) */}
-                <div className="bg-slate-50 border-t lg:border-t-0 lg:border-l border-slate-200 p-4 flex flex-col justify-between overflow-y-auto">
-                  {selectedNodeData ? (
-                    <div className="space-y-4 flex-1 flex flex-col justify-between h-full">
-                      <div className="space-y-4">
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${
-                              selectedNodeData.is_seed 
-                                ? "bg-blue-100 text-blue-700 border border-blue-200" 
-                                : "bg-slate-200 text-slate-700"
-                            }`}>
-                              {selectedNodeData.is_seed ? "SEED ACCOUNT" : "COUNTERPARTY"}
-                            </span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                              selectedNodeData.risk_tier === "CRITICAL" ? "bg-red-100 text-red-700" :
-                              selectedNodeData.risk_tier === "HIGH" ? "bg-orange-100 text-orange-700" :
-                              selectedNodeData.risk_tier === "MEDIUM" ? "bg-yellow-100 text-yellow-700" :
-                              "bg-green-100 text-green-700"
-                            }`}>
-                              {selectedNodeData.risk_tier} RISK ({selectedNodeData.risk_score.toFixed(1)})
-                            </span>
+                    {/* Modes */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Channels</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["UPI", "NEFT", "IMPS", "RTGS"].map((mode) => {
+                          const isSelected = selectedModes.includes(mode);
+                          return (
+                            <button
+                              key={mode}
+                              onClick={() =>
+                                setSelectedModes((prev) =>
+                                  prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
+                                )
+                              }
+                              className={`rounded px-2 py-0.5 text-[9px] font-medium transition-all ${
+                                isSelected
+                                  ? "bg-blue-600 text-white"
+                                  : "bg-slate-950 border border-slate-800 text-slate-400 hover:bg-slate-900"
+                              }`}
+                            >
+                              {mode}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Flagged Status */}
+                    <div className="flex items-center justify-between border-t border-slate-800 pt-3">
+                      <span className="text-xs text-slate-300">Flagged Only</span>
+                      <button
+                        onClick={() => setFlaggedOnly(!flaggedOnly)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          flaggedOnly ? "bg-red-500" : "bg-slate-800"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            flaggedOnly ? "translate-x-4" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Layout switch */}
+                    <div className="mt-auto border-t border-slate-800 pt-3">
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase block mb-1">Graph Layout</label>
+                      <select
+                        value={layoutName}
+                        onChange={(e) => setLayoutName(e.target.value)}
+                        className="w-full rounded border border-slate-800 bg-slate-950 px-2 py-1 text-xs text-slate-200 focus:outline-none"
+                      >
+                        <option value="cose">CoSE (Organic Force-Directed)</option>
+                        <option value="concentric">Concentric (Radial Tiers)</option>
+                        <option value="grid">Grid (Clean Layout)</option>
+                        <option value="circle">Circle (Circular)</option>
+                      </select>
+                    </div>
+                  </aside>
+
+                  {/* Middle Column: Visual Canvas */}
+                  <main className="flex-1 min-h-[450px] relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden flex flex-col justify-end">
+                    {/* Grid lines background style */}
+                    <div
+                      className="absolute inset-0 pointer-events-none opacity-[0.03]"
+                      style={{
+                        backgroundImage:
+                          "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
+                        backgroundSize: "20px 20px",
+                      }}
+                    />
+
+                    {/* Cytoscape element container */}
+                    <div ref={cyRef} className="absolute inset-0 w-full h-full" />
+
+                    {graphLoading && (
+                      <div className="absolute inset-0 bg-slate-950/80 z-20 flex flex-col items-center justify-center gap-3">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+                        <p className="text-xs text-slate-400 font-medium">Reconstructing money flow network...</p>
+                      </div>
+                    )}
+
+                    {/* Legend Overlay */}
+                    <div className="absolute bottom-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-lg p-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-slate-400 z-10 pointer-events-none">
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-blue-500 border border-white inline-block" />
+                        <span className="font-semibold text-slate-300">Seed Node</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-rose-500 inline-block" />
+                        <span>Critical</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-orange-500 inline-block" />
+                        <span>High</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-yellow-500 inline-block" />
+                        <span>Medium</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
+                        <span className="h-[2px] w-4 bg-slate-500 inline-block" />
+                        <span>Normal Flow</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-[2px] w-4 bg-rose-500 inline-block" />
+                        <span className="text-rose-400 font-semibold">Flagged Flow</span>
+                      </div>
+                    </div>
+                  </main>
+
+                  {/* Right Column: Selection Inspector */}
+                  <aside className="w-full lg:w-76 shrink-0 bg-slate-900/60 p-4 border border-slate-800 rounded-xl flex flex-col gap-4 overflow-y-auto justify-between">
+                    {selectedNodeData ? (
+                      <div className="flex flex-col gap-4 h-full justify-between">
+                        <div className="flex flex-col gap-3">
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-indigo-400 tracking-wider">Account Node</span>
+                            <h3 className="text-xs font-semibold text-slate-100 mt-0.5 select-all font-mono">{selectedNodeData.id}</h3>
                           </div>
-                          <h4 className="mt-2 font-mono text-sm font-bold text-slate-800 select-all">{selectedNodeData.id}</h4>
-                          <p className="text-xs text-slate-500 font-medium">{selectedNodeData.bank}</p>
-                        </div>
 
-                        <div className="border-t border-slate-200 pt-3">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Network Role Profile</p>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div className="bg-white border border-slate-200 rounded p-2">
-                              <span className="text-[9px] text-slate-400 block">Identified Role</span>
-                              <span className="font-semibold text-slate-700 uppercase">{selectedNodeData.role || "UNKNOWN"}</span>
+                          {selectedNodeData.account_holder && (
+                            <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-800">
+                              <span className="text-[9px] text-slate-500 block">Account Holder</span>
+                              <span className="text-xs font-semibold text-slate-200">{selectedNodeData.account_holder}</span>
                             </div>
-                            <div className="bg-white border border-slate-200 rounded p-2">
-                              <span className="text-[9px] text-slate-400 block">Class</span>
-                              <span className="font-semibold text-slate-700">{selectedNodeData.is_internal ? "Internal Mule" : "External Account"}</span>
+                          )}
+
+                          {selectedNodeData.bank && (
+                            <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-800">
+                              <span className="text-[9px] text-slate-500 block">Bank Name</span>
+                              <span className="text-xs font-semibold text-slate-200">{selectedNodeData.bank}</span>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-800 text-center">
+                              <span className="text-[9px] text-slate-500 block">Risk Score</span>
+                              <span className="text-xs font-bold text-red-400">{selectedNodeData.risk_score || 0}%</span>
+                            </div>
+                            <div className="bg-slate-950/50 p-2 rounded-lg border border-slate-800 text-center">
+                              <span className="text-[9px] text-slate-500 block">Risk Tier</span>
+                              <span className={`text-[9px] font-extrabold uppercase mt-0.5 px-1 rounded inline-block ${
+                                selectedNodeData.risk_tier === "CRITICAL"
+                                  ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                                  : selectedNodeData.risk_tier === "HIGH"
+                                  ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              }`}>
+                                {selectedNodeData.risk_tier || "LOW"}
+                              </span>
                             </div>
                           </div>
-                        </div>
 
+                          <div className="bg-slate-950/30 rounded-lg border border-slate-800/80 p-2.5 flex flex-col gap-1.5">
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-slate-400">Node Role</span>
+                              <span className="capitalize font-medium text-slate-200">{selectedNodeData.role || "Unknown"}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-slate-400">Total Txns</span>
+                              <span className="font-semibold text-slate-200">{selectedNodeData.total_transactions || 0}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-slate-400">In / Out Degree</span>
+                              <span className="font-semibold text-slate-200">{selectedNodeData.in_degree || 0} / {selectedNodeData.out_degree || 0}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-slate-400">Total Inflow</span>
+                              <span className="font-semibold text-emerald-400">₹{selectedNodeData.total_received?.toLocaleString() || 0}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-slate-400">Total Outflow</span>
+                              <span className="font-semibold text-red-400">₹{selectedNodeData.total_forwarded?.toLocaleString() || 0}</span>
+                            </div>
+                          </div>
                         <div className="border-t border-slate-200 pt-3">
                           <button
                             onClick={() => onOpenMoneyTrail && onOpenMoneyTrail(selectedNodeData.id)}
@@ -866,33 +1137,34 @@ export default function ReportView({
                           </button>
                         </div>
 
-                        <div className="border-t border-slate-200 pt-3 flex flex-col min-h-0">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Account Transaction Ledger (Database)</p>
+                        {/* Database Transactions sub-table */}
+                        <div className="flex flex-col min-h-0">
+                          <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Account Transaction Ledger</p>
                           {nodeTransactionsLoading ? (
-                            <div className="text-center text-xs text-slate-400 py-4 flex flex-col items-center gap-1.5">
-                              <div className="animate-spin rounded-full h-4 w-4 border border-blue-500 border-t-transparent" />
+                            <div className="text-center text-[11px] text-slate-500 py-3 flex flex-col items-center gap-1.5">
+                              <div className="animate-spin rounded-full h-3 w-3 border border-indigo-500 border-t-transparent" />
                               Loading database transactions...
                             </div>
                           ) : nodeTransactions.length > 0 ? (
-                            <div className="overflow-y-auto border border-slate-200 rounded-lg max-h-[220px]">
-                              <table className="w-full text-left text-[11px]">
-                                <thead className="bg-slate-100 text-slate-500 font-semibold sticky top-0 uppercase">
+                            <div className="overflow-y-auto border border-slate-800 rounded-lg max-h-[160px] bg-slate-950">
+                              <table className="w-full text-left text-[10px]">
+                                <thead className="bg-slate-900 text-slate-400 font-semibold sticky top-0 uppercase text-[9px]">
                                   <tr>
-                                    <th className="px-2.5 py-1.5">Date</th>
-                                    <th className="px-2.5 py-1.5">Narration</th>
-                                    <th className="px-2.5 py-1.5 text-right">Amount</th>
+                                    <th className="px-2 py-1">Date</th>
+                                    <th className="px-2 py-1">Narration</th>
+                                    <th className="px-2 py-1 text-right">Amount</th>
                                   </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100 bg-white">
+                                <tbody className="divide-y divide-slate-900 bg-slate-950">
                                   {nodeTransactions.map((t, idx) => {
                                     const isDebit = t.debit > 0;
                                     const amount = isDebit ? t.debit : t.credit;
                                     const isSuspicious = t.is_high_value_flag || t.is_balance_breach || (t.final_risk_score && t.final_risk_score >= 0.7);
                                     return (
-                                      <tr key={t.id || idx} className={`hover:bg-slate-50 ${isSuspicious ? "bg-red-50/30" : ""}`}>
-                                        <td className="px-2.5 py-1.5 whitespace-nowrap text-slate-500 font-mono text-[10px]">{t.date}</td>
-                                        <td className="px-2.5 py-1.5 text-slate-600 truncate max-w-[120px]" title={t.narration}>{t.narration}</td>
-                                        <td className={`px-2.5 py-1.5 text-right font-mono font-semibold ${isDebit ? "text-red-600" : "text-green-600"}`}>
+                                      <tr key={t.id || idx} className={`hover:bg-slate-900/60 ${isSuspicious ? "bg-red-500/5" : ""}`}>
+                                        <td className="px-2 py-1 whitespace-nowrap text-slate-500 font-mono text-[9px]">{t.date}</td>
+                                        <td className="px-2 py-1 text-slate-300 truncate max-w-[100px]" title={t.narration}>{t.narration}</td>
+                                        <td className={`px-2 py-1 text-right font-mono font-semibold ${isDebit ? "text-red-400" : "text-emerald-400"}`}>
                                           {isDebit ? "-" : "+"}₹{amount.toLocaleString("en-IN")}
                                         </td>
                                       </tr>
@@ -902,7 +1174,7 @@ export default function ReportView({
                               </table>
                             </div>
                           ) : (
-                            <p className="text-[11px] text-slate-400 text-center py-4 bg-white border border-dashed border-slate-200 rounded-lg">No database transactions found for this account.</p>
+                            <p className="text-[10px] text-slate-500 text-center py-3 bg-slate-950 border border-dashed border-slate-800 rounded-lg">No database transactions found for this account.</p>
                           )}
                         </div>
                       </div>
@@ -943,8 +1215,7 @@ export default function ReportView({
                   )}
                 </div>
               </div>
-            </div>
-          )}
+            )}
           </div>
         )
       )}
