@@ -1,2 +1,0 @@
-file,extension,bank_detected,rows_parsed,rows_after_clean,parse_warnings,status
-08874795659248.pdf,.pdf,Bandhan Bank,79,77,"PDF table: 79 rows, 7 cols (bank=bandhan) | Bank: Bandhan Bank (ifsc_lookup:BDBL0002295) | date=TRANS DATE | nar=DESCRIPTION | dr=DEBITS | cr=CREDITS | bal=BALANCE | Skipped 2 non-transaction rows",ok
