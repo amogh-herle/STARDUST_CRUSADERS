@@ -103,10 +103,12 @@ export default function ReportView({
   files,
   uploadResult,
   activeSubView = "reports",
+  onOpenMoneyTrail,
 }: {
   files: File[];
   uploadResult?: UploadResult;
   activeSubView?: "reports" | "graph";
+  onOpenMoneyTrail?: (accountId: string) => void;
 }) {
   const [analytics, setAnalytics] = useState<AnalyticsStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,6 +141,22 @@ export default function ReportView({
   const [selectedRiskTiers, setSelectedRiskTiers] = useState<string[]>([]);
   const [selectedModes, setSelectedModes] = useState<string[]>([]);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+
+  const handleHighlightNode = (nodeId: string) => {
+    if (cyInstance.current) {
+      const node = cyInstance.current.$id(nodeId);
+      if (node.length > 0) {
+        cyInstance.current.elements().unselect();
+        node.select();
+        cyInstance.current.animate({
+          center: { eles: node },
+          zoom: Math.max(cyInstance.current.zoom(), 1.2),
+          duration: 400
+        });
+        setSelectedNodeData(node.data());
+      }
+    }
+  };
 
   // Load transactions for the selected node
   useEffect(() => {
@@ -859,22 +877,50 @@ export default function ReportView({
                       </div>
                     </div>
 
-                    {/* Anomaly score slider */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Anomaly score</label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={minAnomalyScore}
-                        onChange={(e) => setMinAnomalyScore(Number(e.target.value))}
-                        className="w-full accent-indigo-500"
-                      />
-                      <div className="flex justify-between text-[9px] text-slate-400 mt-1">
-                        <span>0.00</span>
-                        <span className="font-semibold text-indigo-400">{minAnomalyScore.toFixed(2)}</span>
-                        <span>1.00</span>
+                    {/* Date Filter Slider */}
+                    {(() => {
+                      const allDates = Array.from(new Set(graphData.edges.flatMap(e => e.data.dates || []))).sort();
+                      if (allDates.length <= 1) return null;
+                      return (
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-medium text-slate-700">Filter Transactions From Date</span>
+                            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                              {allDates[minDateIndex] || "All Dates"}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max={allDates.length - 1}
+                            step="1"
+                            value={minDateIndex}
+                            onChange={(e) => setMinDateIndex(Number(e.target.value))}
+                            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 border border-slate-200 rounded-xl overflow-hidden min-h-[460px]">
+                {/* Graph View (Left columns) */}
+                <div className="lg:col-span-2 relative bg-slate-900 overflow-hidden flex flex-col justify-end min-h-[350px] lg:min-h-auto">
+                  {/* Grid lines background style */}
+                  <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{
+                    backgroundImage: "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
+                    backgroundSize: "20px 20px"
+                  }} />
+
+                  {/* Cytoscape element container */}
+                  <div ref={cyRef} className="absolute inset-0 w-full h-full" />
+
+                  {graphLoading && (
+                    <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center text-sm text-blue-400 font-semibold z-10">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
+                        Traced fund propagation…
                       </div>
                     </div>
 
@@ -1081,6 +1127,14 @@ export default function ReportView({
                               <span className="font-semibold text-red-400">₹{selectedNodeData.total_forwarded?.toLocaleString() || 0}</span>
                             </div>
                           </div>
+                        <div className="border-t border-slate-200 pt-3">
+                          <button
+                            onClick={() => onOpenMoneyTrail && onOpenMoneyTrail(selectedNodeData.id)}
+                            className="w-full flex items-center justify-between rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/10"
+                          >
+                            <span>💰 Open Money Trail for this account</span>
+                            <span>&rarr;</span>
+                          </button>
                         </div>
 
                         {/* Database Transactions sub-table */}
@@ -1124,13 +1178,41 @@ export default function ReportView({
                           )}
                         </div>
                       </div>
-                    ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                        <div className="text-2xl text-slate-600">⚙</div>
-                        <p className="text-[11px] text-slate-400 mt-2 font-medium">Select any node in the graph to display deep forensic intelligence</p>
-                      </div>
-                    )}
-                  </aside>
+
+                      {/* Trace buttons */}
+                      {!selectedNodeData.is_seed && (
+                        <div className="pt-2">
+                          <button
+                            onClick={() => {
+                              setSelectedAccountId(selectedNodeData.id);
+                            }}
+                            className="w-full rounded-lg bg-accent text-white hover:bg-blue-600 py-2 text-xs font-semibold shadow-sm transition-colors"
+                          >
+                            Trace this node's money trail →
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                      <div className="text-2xl text-slate-300">⚙</div>
+                      <p className="text-xs text-slate-400 mt-2 font-medium">Select any node in the graph to display deep forensic intelligence</p>
+                    </div>
+                  )}
+
+                  {/* Back to top seed if currently navigated away */}
+                  {selectedAccountId && analytics?.top_accounts && analytics.top_accounts.length > 0 && selectedAccountId !== analytics.top_accounts[0].account_id && (
+                    <button
+                      onClick={() => {
+                        if (analytics?.top_accounts && analytics.top_accounts[0]) {
+                          setSelectedAccountId(analytics.top_accounts[0].account_id);
+                        }
+                      }}
+                      className="mt-3 w-full rounded border border-slate-200 bg-white hover:bg-slate-50 py-1.5 text-xs text-slate-600 font-medium transition-colors"
+                    >
+                      ← Back to Primary Suspect ({analytics?.top_accounts?.[0]?.account_id})
+                    </button>
+                  )}
                 </div>
               </div>
             )}

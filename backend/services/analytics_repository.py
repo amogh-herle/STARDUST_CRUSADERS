@@ -99,6 +99,21 @@ class AnalyticsRepository:
         risk_scores = self._frame("risk_scores")
         return risk_scores[risk_scores["account_id"].astype(str).isin(member_ids)].to_dict(orient="records")
 
+    def get_current_account_ids(self) -> set[str]:
+        """
+        Account IDs that belong to the *current* analytics run (i.e. the most
+        recently uploaded/processed set of statements), as loaded from
+        risk_scores.csv. This is the scoping key that should be used anywhere
+        the app shows "the graph" or "the accounts" for the active case —
+        NOT a raw, unscoped query against the accounts table, which
+        accumulates every account ever ingested (including demo/seed data
+        and accounts from earlier, unrelated uploads).
+        """
+        df = self._frame("risk_scores")
+        if df.empty or "account_id" not in df.columns:
+            return set()
+        return set(df["account_id"].astype(str).tolist())
+
     def get_top_risk_accounts(self, limit: int = 10) -> list[Dict[str, Any]]:
         df = self._frame("risk_scores")
         if df.empty:

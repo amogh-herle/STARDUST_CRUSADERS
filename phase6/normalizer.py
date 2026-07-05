@@ -214,9 +214,9 @@ def normalize(
 
         debit, credit = 0.0, 0.0
 
-        if roles.get("debit") or roles.get("credit"):
-            debit,  d_sign = parse_amount(_get(row, roles["debit"])) if roles.get("debit") else (0.0, "")
-            credit, c_sign = parse_amount(_get(row, roles["credit"])) if roles.get("credit") else (0.0, "")
+        if roles.get("debit") and roles.get("credit"):
+            debit,  d_sign = parse_amount(_get(row, roles["debit"]))
+            credit, c_sign = parse_amount(_get(row, roles["credit"]))
             if d_sign == "+":
                 credit, debit = debit, 0.0
             if c_sign == "-":
