@@ -134,6 +134,7 @@ export default function ReportView({
   const [targetDateStr, setTargetDateStr] = useState<string>("");
   const [totalTxnCount, setTotalTxnCount] = useState<number>(0);
   const [minAmount, setMinAmount] = useState<number>(0);
+  const [minDateIndex, setMinDateIndex] = useState<number>(0);
 
   // New AML Filter states for the dashboard Graph View
   const [searchQuery, setSearchQuery] = useState("");
@@ -539,7 +540,7 @@ export default function ReportView({
 
     cy.on("tap", "node", (evt) => {
       const data = evt.target.data();
-      setSelectedNodeData(data);
+      handleHighlightNode(data.id);
       if (data && data.id) {
         if (isOverviewMode) {
           setIsOverviewMode(false);
@@ -879,7 +880,10 @@ export default function ReportView({
 
                     {/* Date Filter Slider */}
                     {(() => {
-                      const allDates = Array.from(new Set(graphData.edges.flatMap(e => e.data.dates || []))).sort();
+                      const allDates = Array.from(new Set(graphData?.edges?.flatMap(e => {
+                        const base = e?.data || e;
+                        return base?.dates || ((base as any)?.datetime ? [(base as any).datetime.split(" ")[0]] : []);
+                      }) || [])).sort();
                       if (allDates.length <= 1) return null;
                       return (
                         <div className="flex-1">
@@ -901,28 +905,7 @@ export default function ReportView({
                         </div>
                       );
                     })()}
-                  </div>
-                )}
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 border border-slate-200 rounded-xl overflow-hidden min-h-[460px]">
-                {/* Graph View (Left columns) */}
-                <div className="lg:col-span-2 relative bg-slate-900 overflow-hidden flex flex-col justify-end min-h-[350px] lg:min-h-auto">
-                  {/* Grid lines background style */}
-                  <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{
-                    backgroundImage: "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
-                    backgroundSize: "20px 20px"
-                  }} />
-
-                  {/* Cytoscape element container */}
-                  <div ref={cyRef} className="absolute inset-0 w-full h-full" />
-
-                  {graphLoading && (
-                    <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center text-sm text-blue-400 font-semibold z-10">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent" />
-                        Traced fund propagation…
-                      </div>
-                    </div>
 
                     {/* Risk Tier */}
                     <div>
@@ -1213,8 +1196,9 @@ export default function ReportView({
                       ← Back to Primary Suspect ({analytics?.top_accounts?.[0]?.account_id})
                     </button>
                   )}
-                </div>
+                </aside>
               </div>
+            </div>
             )}
           </div>
         )
