@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { uploadStatements, type UploadResult } from "@/lib/api";
 import { getSession } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/client";
 import { NewCaseModal, type Case } from "./Topbar";
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".csv", ".xlsx", ".xls", ".docx", ".png", ".jpg", ".jpeg"];
@@ -26,8 +27,10 @@ function isAccepted(file: File) {
 }
 
 export default function UploadZone({
+  activeCase,
   onSubmit,
 }: {
+  activeCase?: Case | null;
   onSubmit: (files: File[], result: UploadResult) => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -38,9 +41,11 @@ export default function UploadZone({
   const [showConfirmCase, setShowConfirmCase] = useState(false);
   const [uploadedResult, setUploadedResult] = useState<UploadResult | null>(null);
   const [caseConfirmed, setCaseConfirmed] = useState(false);
+  const [currentCase, setCurrentCase] = useState<Case | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const user = getSession();
+  const isCaseConfirmed = caseConfirmed || !!activeCase;
 
   const addFiles = useCallback((incoming: FileList | null) => {
     if (!incoming) return;
@@ -79,6 +84,29 @@ export default function UploadZone({
 
     try {
       const result = await uploadStatements(validFiles.map((f) => f.file));
+
+      // Link upload to case if a case context is active
+      const caseContext = activeCase || currentCase;
+      if (caseContext && user) {
+        try {
+          const supabase = createClient();
+          const fileNames = validFiles.map((f) => f.file.name);
+          const { error: updateError } = await supabase
+            .from("cases")
+            .update({
+              upload_id: result.upload_id,
+              uploaded_files: fileNames,
+            })
+            .eq("id", caseContext.id);
+
+          if (updateError) {
+            console.warn("Failed to update case file links:", updateError);
+          }
+        } catch (dbErr) {
+          console.warn("Database error linking files to case:", dbErr);
+        }
+      }
+
       clearInterval(interval);
       setUploadState("done");
       setUploadedResult(result);
@@ -91,12 +119,24 @@ export default function UploadZone({
   };
 
   const handleCaseCreated = (newCase: Case) => {
+    setCurrentCase(newCase);
     setCaseConfirmed(true);
     setShowConfirmCase(false);
   };
 
   return (
     <div className="w-full max-w-2xl mx-auto">
+      {activeCase && (
+        <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 text-xs text-indigo-900 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-base">💼</span>
+            <span>
+              Uploading statements to active case: <strong>{activeCase.case_name}</strong> ({activeCase.case_number})
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Drop zone */}
       <div
         onDragOver={(e) => {
@@ -161,7 +201,7 @@ export default function UploadZone({
           ))}
 
           {/* Confirm Case button (after files uploaded) / Analyze button (after case confirmed) / loading / error */}
-          {uploadState === "idle" && !caseConfirmed && (
+          {uploadState === "idle" && !isCaseConfirmed && (
             <button
               onClick={() => setShowConfirmCase(true)}
               disabled={validFiles.length === 0}
@@ -171,7 +211,7 @@ export default function UploadZone({
             </button>
           )}
 
-          {uploadState === "idle" && caseConfirmed && (
+          {uploadState === "idle" && isCaseConfirmed && (
             <button
               onClick={handleAnalyze}
               disabled={validFiles.length === 0}

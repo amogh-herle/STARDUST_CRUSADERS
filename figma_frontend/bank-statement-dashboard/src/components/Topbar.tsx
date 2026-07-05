@@ -22,6 +22,8 @@ export type Case = {
   status: string;
   priority: string;
   created_at: string;
+  uploaded_files?: string[] | null;
+  upload_id?: string | null;
 };
 
 const PRIORITY_OPTIONS = ["low", "medium", "high", "critical"] as const;
@@ -198,7 +200,15 @@ export function NewCaseModal({
 }
 
 // ─── Topbar ───────────────────────────────────────────────────────────────────
-export default function Topbar({ view }: { view: View }) {
+export default function Topbar({
+  view,
+  activeCase,
+  onClearActiveCase,
+}: {
+  view: View;
+  activeCase?: Case | null;
+  onClearActiveCase?: () => void;
+}) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   // Removed showNewCase state - New Case button removed from topbar
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -257,11 +267,27 @@ export default function Topbar({ view }: { view: View }) {
   return (
     <>
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-            CIDECODE 2026
-          </p>
-          <h1 className="text-sm font-semibold text-foreground">{TITLES[view]}</h1>
+        <div className="flex items-center gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
+              CIDECODE 2026
+            </p>
+            <h1 className="text-sm font-semibold text-foreground">{TITLES[view]}</h1>
+          </div>
+          {activeCase && (
+            <div className="flex items-center gap-1.5 rounded-full bg-slate-100 border border-slate-200 px-3 py-1 text-xs text-slate-700 font-medium ml-4">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
+              <span>Active Case: <strong>{activeCase.case_name}</strong></span>
+              <span className="text-[10px] text-slate-400 font-mono">({activeCase.case_number})</span>
+              <button
+                onClick={() => onClearActiveCase && onClearActiveCase()}
+                className="ml-1 text-slate-400 hover:text-slate-600 font-bold"
+                title="Deselect active case"
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

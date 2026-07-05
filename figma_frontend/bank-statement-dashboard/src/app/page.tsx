@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Sidebar, { View } from "@/components/Sidebar";
-import Topbar from "@/components/Topbar";
+import Topbar, { type Case } from "@/components/Topbar";
 import UploadZone from "@/components/UploadZone";
 import ReportView from "@/components/ReportView";
 import MoneyTrailView from "@/components/MoneyTrailView";
@@ -14,6 +14,7 @@ export default function Home() {
   const [submittedFiles, setSubmittedFiles] = useState<File[]>([]);
   const [uploadResult, setUploadResult] = useState<UploadResult | undefined>();
   const [moneyTrailAccountId, setMoneyTrailAccountId] = useState<string | null>(null);
+  const [activeCase, setActiveCase] = useState<Case | null>(null);
 
   const handleSubmit = (files: File[], result: UploadResult) => {
     setSubmittedFiles(files);
@@ -32,10 +33,19 @@ export default function Home() {
       <Sidebar view={view} onChange={setView} />
 
       <div className="flex flex-1 flex-col">
-        <Topbar view={view} />
+        <Topbar
+          view={view}
+          activeCase={activeCase}
+          onClearActiveCase={() => setActiveCase(null)}
+        />
 
         <main className="flex flex-1 flex-col items-center justify-center px-8 py-12">
-          {view === "upload" && <UploadZone onSubmit={handleSubmit} />}
+          {view === "upload" && (
+            <UploadZone
+              activeCase={activeCase}
+              onSubmit={handleSubmit}
+            />
+          )}
           {(view === "reports" || view === "graph") && (
             <ReportView
               files={submittedFiles}
@@ -50,7 +60,30 @@ export default function Home() {
               onAccountChange={setMoneyTrailAccountId}
             />
           )}
-          {view === "library" && <LibraryView />}
+          {view === "library" && (
+            <LibraryView
+              onOpenCase={(c, uploadedFiles, uploadId) => {
+                setActiveCase(c);
+                if (uploadId && uploadedFiles && uploadedFiles.length > 0) {
+                  const mockFiles = uploadedFiles.map((fileName) => new File([], fileName));
+                  setSubmittedFiles(mockFiles);
+                  setUploadResult({
+                    upload_id: uploadId,
+                    files_received: mockFiles.length,
+                    files_ingested: mockFiles.length,
+                    rows_parsed: 0,
+                    rows_after_clean: 0,
+                    banks_detected: [],
+                    warnings: [],
+                    status: "success",
+                  });
+                  setView("reports");
+                } else {
+                  setView("upload");
+                }
+              }}
+            />
+          )}
         </main>
       </div>
     </div>
