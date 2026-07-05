@@ -13,15 +13,20 @@ Edge weight = total amount transferred between the pair.
 Risk score encoded as node colour gradient in the frontend.
 """
 
+from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from collections import defaultdict
 
 from dependencies import get_db
 from models import Account, Transaction, FraudRing, FraudRingMember
-from schemas import GraphData, GraphNode, GraphEdge
+from schemas import (
+    GraphData, GraphNode, GraphEdge,
+    MoneyTrailResponse, SeedCredit, MoneyTrailHop, MoneyTrailNode, SourceCreditAllocation,
+    CreditTrailInfo
+)
 
 router = APIRouter(prefix="/graph", tags=["Graph"])
 
@@ -645,5 +650,583 @@ async def get_ledger_trace(account_id: str, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         print(f"Failed dynamic database trace fallback: {str(e)}")
 
-    raise HTTPException(status_code=404, detail=f"Ledger trace for account {account_id} not found")
+    # Fallback: Return a single-node graph if no files or transactions exist
+    try:
+        from models import Account
+        seed_acct = await db.get(Account, account_id)
+        seed_score = float(seed_acct.risk_score) if seed_acct else 80.0
+        seed_risk_tier = "CRITICAL" if seed_score >= 75 else "HIGH" if seed_score >= 50 else "MEDIUM" if seed_score >= 25 else "LOW"
+        node = {
+            "data": {
+                "id": account_id,
+                "label": account_id,
+                "bank": seed_acct.bank_name if (seed_acct and seed_acct.bank_name) else "UNKNOWN Bank",
+                "risk_score": seed_score,
+                "risk_tier": seed_risk_tier,
+                "role": "mule",
+                "is_seed": True,
+                "is_internal": True
+            }
+        }
+        return {"nodes": [node], "edges": []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate fallback ledger trace: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# FIFO Money Trail flow tracing helper functions and endpoint
+# ---------------------------------------------------------------------------
+
+async def find_matching_credit_txn_db(
+    db: AsyncSession,
+    sender_acc: str,
+    receiver_acc: str,
+    debit_amount: float,
+    debit_date: str,
+    debit_time: Optional[str],
+    debit_utr: Optional[str]
+) -> Optional[Transaction]:
+    if not receiver_acc or receiver_acc.upper() in {"UNKNOWN", "NAN", "NONE", ""}:
+        return None
+    
+    debit_time_clean = debit_time or "00:00:00"
+    try:
+        debit_dt = datetime.strptime(f"{debit_date} {debit_time_clean}", "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        try:
+            debit_dt = datetime.strptime(debit_date, "%Y-%m-%d")
+        except Exception:
+            debit_dt = None
+            
+    # 1. Match by UTR if available
+    if debit_utr and str(debit_utr).strip() and str(debit_utr).strip().lower() not in {"nan", "none", ""}:
+        utr_clean = str(debit_utr).strip()
+        q = select(Transaction).where(
+            Transaction.account_id == receiver_acc,
+            Transaction.credit > 0,
+            Transaction.utr_ref == utr_clean
+        )
+        res = (await db.execute(q)).scalars().all()
+        if res:
+            if len(res) == 1:
+                return res[0]
+            if debit_dt:
+                def time_diff(t):
+                    try:
+                        t_time = t.time or "00:00:00"
+                        t_dt = datetime.strptime(f"{t.date} {t_time}", "%Y-%m-%d %H:%M:%S")
+                        return abs((t_dt - debit_dt).total_seconds())
+                    except Exception:
+                        return float('inf')
+                return min(res, key=time_diff)
+            return res[0]
+            
+    # 2. Match by amount and time window (24 hours)
+    q = select(Transaction).where(
+        Transaction.account_id == receiver_acc,
+        Transaction.credit > 0
+    )
+    credits = (await db.execute(q)).scalars().all()
+    
+    if not credits:
+        return None
+        
+    candidates = []
+    for cred in credits:
+        cred_amt = float(cred.credit)
+        if debit_amount <= 0:
+            continue
+        if abs(cred_amt - debit_amount) / debit_amount > 0.05:
+            continue
+            
+        if debit_dt:
+            try:
+                cred_time = cred.time or "00:00:00"
+                cred_dt = datetime.strptime(f"{cred.date} {cred_time}", "%Y-%m-%d %H:%M:%S")
+                time_diff = abs((cred_dt - debit_dt).total_seconds())
+                if time_diff > 24 * 3600:
+                    continue
+            except Exception:
+                if cred.date != debit_date:
+                    continue
+                time_diff = 12 * 3600
+        else:
+            if cred.date != debit_date:
+                continue
+            time_diff = 0
+            
+        cp_acc = str(cred.counterparty_account_id or "").strip()
+        cp_name = str(cred.counterparty_name or "").strip()
+        is_sender_match = (
+            sender_acc == cp_acc or
+            sender_acc in cp_name.upper() or
+            cp_name.upper() in sender_acc
+        )
+        
+        penalty = time_diff
+        if not is_sender_match:
+            penalty += 100000.0
+            
+        candidates.append((cred, penalty))
+        
+    if candidates:
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0][0]
+        
+    return None
+
+
+def clean_and_sort_txns(txns: list[Transaction]) -> list[Transaction]:
+    def txn_key(t):
+        d = t.date or "2000-01-01"
+        tm = t.time or "00:00:00"
+        t_id = t.transaction_id or str(t.id) or ""
+        return (d, tm, t_id)
+        
+    sorted_txns = sorted(txns, key=txn_key)
+    
+    seen_ids = set()
+    seen_utrs = set()
+    unique_txns = []
+    for t in sorted_txns:
+        t_id = t.transaction_id
+        utr = t.utr_ref
+        is_dup = False
+        if t_id and t_id in seen_ids:
+            is_dup = True
+        if utr and utr in seen_utrs:
+            is_dup = True
+            
+        if not is_dup:
+            if t_id:
+                seen_ids.add(t_id)
+            if utr:
+                seen_utrs.add(utr)
+            unique_txns.append(t)
+    return unique_txns
+
+
+async def get_account_name_map(account_ids: list[str], db: AsyncSession) -> dict[str, str]:
+    if not account_ids:
+        return {}
+    name_map = {}
+    
+    # 1. Query Accounts
+    acc_q = select(Account).where(Account.account_id.in_(account_ids))
+    db_accs = (await db.execute(acc_q)).scalars().all()
+    for acc in db_accs:
+        if acc.holder_name and acc.holder_name.strip() not in {"", "Unknown", "Unknown Holder", "nan", "NaN"}:
+            name_map[acc.account_id] = acc.holder_name.strip()
+            
+    # 2. Query Transactions where these accounts are counterparties
+    tx_q = select(
+        Transaction.counterparty_account_id,
+        Transaction.counterparty_name
+    ).where(
+        Transaction.counterparty_account_id.in_(account_ids),
+        Transaction.counterparty_name.isnot(None),
+        Transaction.counterparty_name != "",
+        Transaction.counterparty_name != "Unknown",
+        Transaction.counterparty_name != "Unknown Holder",
+        Transaction.counterparty_name != "nan",
+        Transaction.counterparty_name != "NaN"
+    ).distinct()
+    tx_results = (await db.execute(tx_q)).all()
+    for row in tx_results:
+        # Prefer counterparty_name from transactions if it's set
+        val = row.counterparty_name.strip()
+        name_map[row.counterparty_account_id] = val
+        
+    return name_map
+
+
+def compute_fifo_allocations_for_account(txns: list[Transaction]) -> tuple[dict, dict, dict]:
+    def txn_key(t):
+        d = t.date or "2000-01-01"
+        tm = t.time or "00:00:00"
+        t_id = t.transaction_id or str(t.id) or ""
+        return (d, tm, t_id)
+    
+    sorted_txns = sorted(txns, key=txn_key)
+    
+    credit_queue = []
+    allocations = {}
+    debit_funding = {}
+    debit_untracked = {}
+    
+    for t in sorted_txns:
+        debit_amt = float(t.debit or 0.0)
+        credit_amt = float(t.credit or 0.0)
+        t_id = str(t.id)
+        
+        if credit_amt > 0:
+            credit_queue.append({
+                "id": t_id,
+                "amount": credit_amt,
+                "remaining": credit_amt
+            })
+            allocations[t_id] = []
+            
+        if debit_amt > 0:
+            remaining_debit = debit_amt
+            sources = []
+            while remaining_debit > 0 and credit_queue:
+                oldest = credit_queue[0]
+                allocated = min(remaining_debit, oldest["remaining"])
+                
+                oldest["remaining"] -= allocated
+                remaining_debit -= allocated
+                
+                allocations[oldest["id"]].append({
+                    "debit_txn_id": t_id,
+                    "allocated_amount": allocated
+                })
+                sources.append(oldest["id"])
+                
+                if oldest["remaining"] <= 0:
+                    credit_queue.pop(0)
+                    
+            debit_funding[t_id] = sources
+            debit_untracked[t_id] = (remaining_debit > 0)
+            
+    return allocations, debit_funding, debit_untracked
+
+
+def get_tracked_allocations(allocations_for_credit, tracked_amount):
+    res = []
+    rem = tracked_amount
+    for alloc in allocations_for_credit:
+        if rem <= 0:
+            break
+        allocated = min(rem, alloc["allocated_amount"])
+        res.append({
+            "debit_txn_id": alloc["debit_txn_id"],
+            "amount": allocated
+        })
+        rem -= allocated
+    return res
+
+
+async def trace_money_trail_mode(
+    account_id: str,
+    seed_txn: Transaction,
+    db: AsyncSession
+) -> tuple[list[MoneyTrailHop], list[MoneyTrailNode]]:
+    def get_txn_ident(t):
+        return t.transaction_id or str(t.id)
+
+    all_hops = []
+    
+    # BFS queue state
+    # Each item: { "account_id": str, "visited_accounts": list[str], "tracked_credits": { txn_id: amount } }
+    queue = [
+        {
+            "account_id": account_id,
+            "visited_accounts": [account_id],
+            "tracked_credits": { get_txn_ident(seed_txn): float(seed_txn.credit) }
+        }
+    ]
+
+    while queue:
+        item = queue.pop(0)
+        curr_acc = item["account_id"]
+        visited = item["visited_accounts"]
+        tracked = item["tracked_credits"]
+
+        if len(visited) > 8:  # Hop/depth limit to prevent infinite loops
+            continue
+
+        # Load all transactions for this account
+        txns_q = select(Transaction).where(Transaction.account_id == curr_acc)
+        txns = (await db.execute(txns_q)).scalars().all()
+        if not txns:
+            continue
+
+        # Clean and sort transactions deterministically
+        txns = clean_and_sort_txns(txns)
+
+        # Build mapping from transaction ID / transaction_id to the Transaction object
+        txn_map = {}
+        for t in txns:
+            txn_map[str(t.id)] = t
+            if t.transaction_id:
+                txn_map[t.transaction_id] = t
+
+        allocations, debit_funding, debit_untracked = compute_fifo_allocations_for_account(txns)
+
+        # Track debits funded by our tracked credits
+        debits_to_trace = {}
+        for C_id, tracked_amt in tracked.items():
+            if C_id in allocations:
+                allocs = get_tracked_allocations(allocations[C_id], tracked_amt)
+                for alloc in allocs:
+                    d_id = alloc["debit_txn_id"]
+                    amt = alloc["amount"]
+                    if d_id not in debits_to_trace:
+                        debits_to_trace[d_id] = {
+                            "debit_txn": txn_map[d_id],
+                            "tracked_amount": 0.0,
+                            "source_credits": set(),
+                            "source_credits_detail": []
+                        }
+                    debits_to_trace[d_id]["tracked_amount"] += amt
+                    debits_to_trace[d_id]["source_credits"].add(C_id)
+                    
+                    existing = next((x for x in debits_to_trace[d_id]["source_credits_detail"] if x["credit_txn_id"] == C_id), None)
+                    if existing:
+                        existing["amount"] += amt
+                    else:
+                        debits_to_trace[d_id]["source_credits_detail"].append({
+                            "credit_txn_id": C_id,
+                            "amount": amt
+                        })
+
+        for d_id, d_info in debits_to_trace.items():
+            D = d_info["debit_txn"]
+            tracked_amt = d_info["tracked_amount"]
+            to_acc = D.counterparty_account_id or D.counterparty_name or "UNKNOWN"
+            debit_ident = get_txn_ident(D)
+
+            funding_sources = debit_funding.get(str(D.id), [])
+            source_credit_txn_idents = []
+            for fs in funding_sources:
+                fs_txn = txn_map.get(fs)
+                if fs_txn:
+                    source_credit_txn_idents.append(get_txn_ident(fs_txn))
+                else:
+                    source_credit_txn_idents.append(fs)
+
+            is_commingled = len(source_credit_txn_idents) > 1
+            is_untracked_remainder = debit_untracked.get(str(D.id), False)
+            is_cycle = to_acc in visited
+
+            d_time_str = D.time or "00:00:00"
+            
+            source_credits_detail = []
+            for item_sc in d_info["source_credits_detail"]:
+                source_credits_detail.append(
+                    SourceCreditAllocation(
+                        credit_txn_id=item_sc["credit_txn_id"],
+                        amount=round(item_sc["amount"], 2)
+                    )
+                )
+                
+            to_acc_name_val = None
+            if D.counterparty_name and D.counterparty_name.strip() not in {"", "Unknown", "Unknown Holder", "nan", "NaN"}:
+                to_acc_name_val = D.counterparty_name.strip()
+
+            hop = MoneyTrailHop(
+                hop_number=0,  # Will be assigned later after sorting
+                from_account=curr_acc,
+                from_account_name=None,
+                to_account=to_acc,
+                to_account_name=to_acc_name_val,
+                debit_txn_id=debit_ident,
+                amount=round(tracked_amt, 2),
+                timestamp=f"{D.date}T{d_time_str}",
+                source_credit_txn_ids=source_credit_txn_idents,
+                source_credits=source_credits_detail,
+                is_commingled=is_commingled,
+                is_untracked_remainder=is_untracked_remainder,
+                is_cycle=is_cycle
+            )
+            all_hops.append(hop)
+
+            if not is_cycle and to_acc not in {"UNKNOWN", "NAN", "NONE", ""}:
+                # Check if receiver is an internal account
+                acc_exists_q = select(Account).where(Account.account_id == to_acc)
+                acc_exists = (await db.execute(acc_exists_q)).scalar() is not None
+
+                if acc_exists:
+                    # Find corresponding credit txn in target account
+                    match_credit = await find_matching_credit_txn_db(
+                        db,
+                        sender_acc=curr_acc,
+                        receiver_acc=to_acc,
+                        debit_amount=float(D.debit),
+                        debit_date=D.date,
+                        debit_time=D.time,
+                        debit_utr=D.utr_ref
+                    )
+                    if match_credit:
+                        match_credit_ident = get_txn_ident(match_credit)
+                        queue.append({
+                            "account_id": to_acc,
+                            "visited_accounts": visited + [to_acc],
+                            "tracked_credits": { match_credit_ident: tracked_amt }
+                        })
+
+    # Sort all hops chronologically by timestamp
+    all_hops.sort(key=lambda h: h.timestamp)
+    for idx, h in enumerate(all_hops):
+        h.hop_number = idx + 1
+
+    # Determine node roles
+    all_accounts = set([account_id])
+    from_accounts = set()
+    for h in all_hops:
+        all_accounts.add(h.from_account)
+        all_accounts.add(h.to_account)
+        from_accounts.add(h.from_account)
+
+    nodes_list = []
+    for acc in all_accounts:
+        if acc == account_id:
+            role = "seed"
+        elif acc in from_accounts:
+            role = "intermediate"
+        else:
+            role = "exit"
+        nodes_list.append(MoneyTrailNode(account_id=acc, role=role))
+
+    return all_hops, nodes_list
+
+
+@router.get("/money-trail/{account_id}", response_model=MoneyTrailResponse)
+async def get_money_trail_flow(
+    account_id: str,
+    credit_txn_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Traces the multi-hop money flow from a starting account for all incoming credit transactions
+    using FIFO logic.
+    """
+    def get_txn_ident(t):
+        return t.transaction_id or str(t.id)
+
+    # 1. Fetch all credit transactions for this account
+    if credit_txn_id:
+        import uuid as py_uuid
+        try:
+            uuid_val = py_uuid.UUID(credit_txn_id)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+
+        if is_uuid:
+            q = select(Transaction).where(
+                Transaction.account_id == account_id,
+                Transaction.id == uuid_val,
+                Transaction.credit > 0
+            )
+        else:
+            q = select(Transaction).where(
+                Transaction.account_id == account_id,
+                Transaction.transaction_id == credit_txn_id,
+                Transaction.credit > 0
+            )
+        credit_txns = (await db.execute(q)).scalars().all()
+    else:
+        q = select(Transaction).where(
+            Transaction.account_id == account_id,
+            Transaction.credit > 0
+        ).order_by(Transaction.credit.desc())
+        credit_txns = (await db.execute(q)).scalars().all()
+
+    # Deduplicate credit transactions stably
+    unique_credits = []
+    seen_credit_ids = set()
+    seen_credit_utrs = set()
+    
+    # Sort them deterministically: credit desc, date, time, transaction_id/id
+    def credit_sort_key(t):
+        c = float(t.credit or 0.0)
+        d = t.date or "2000-01-01"
+        tm = t.time or "00:00:00"
+        t_id = t.transaction_id or str(t.id) or ""
+        return (-c, d, tm, t_id)
+        
+    sorted_credits = sorted(credit_txns, key=credit_sort_key)
+    for t in sorted_credits:
+        t_id = t.transaction_id
+        utr = t.utr_ref
+        is_dup = False
+        if t_id and t_id in seen_credit_ids:
+            is_dup = True
+        if utr and utr in seen_credit_utrs:
+            is_dup = True
+            
+        if not is_dup:
+            if t_id:
+                seen_credit_ids.add(t_id)
+            if utr:
+                seen_credit_utrs.add(utr)
+            unique_credits.append(t)
+            
+    credit_txns = unique_credits
+
+    if not credit_txns:
+        return MoneyTrailResponse(credits=[])
+
+    credits_list = []
+    all_account_ids = set([account_id])
+    raw_traces = []
+
+    for seed_txn in credit_txns:
+        fifo_hops, fifo_nodes = await trace_money_trail_mode(account_id, seed_txn, db)
+        
+        # Collect accounts
+        if seed_txn.counterparty_account_id:
+            all_account_ids.add(seed_txn.counterparty_account_id)
+        for h in fifo_hops:
+            all_account_ids.add(h.from_account)
+            all_account_ids.add(h.to_account)
+            
+        raw_traces.append((seed_txn, fifo_hops))
+
+    # Fetch name map for all collected accounts
+    name_map = await get_account_name_map(list(all_account_ids), db)
+
+    # Fetch risk details for all destination accounts
+    all_dst_accounts = set()
+    for _, hops in raw_traces:
+        for h in hops:
+            all_dst_accounts.add(h.to_account)
+
+    account_risk_map = {}
+    if all_dst_accounts:
+        q_acc = select(Account).where(Account.account_id.in_(all_dst_accounts))
+        db_accounts = (await db.execute(q_acc)).scalars().all()
+        for acc in db_accounts:
+            score = float(acc.risk_score) if acc.risk_score else 0.0
+            tier = "CRITICAL" if score >= 75 else "HIGH" if score >= 50 else "MEDIUM" if score >= 25 else "LOW"
+            account_risk_map[acc.account_id] = {
+                "risk_tier": tier,
+                "fraud_role": acc.fraud_role or "UNKNOWN"
+            }
+
+    # Populate and build final CreditTrailInfo list
+    for seed_txn, fifo_hops in raw_traces:
+        for h in fifo_hops:
+            h.from_account_name = name_map.get(h.from_account) or "Unknown"
+            if not h.to_account_name or h.to_account_name == "Unknown":
+                h.to_account_name = name_map.get(h.to_account) or "Unknown"
+                
+            acc_info = account_risk_map.get(h.to_account)
+            if acc_info:
+                h.to_account_risk_tier = acc_info["risk_tier"]
+                h.to_account_role = acc_info["fraud_role"]
+            else:
+                h.to_account_risk_tier = "UNKNOWN"
+                h.to_account_role = "UNKNOWN"
+
+        source_account = seed_txn.counterparty_account_id or "Unknown"
+        source_account_name = None
+        if seed_txn.counterparty_name and seed_txn.counterparty_name.strip() not in {"", "Unknown", "Unknown Holder", "nan", "NaN"}:
+            source_account_name = seed_txn.counterparty_name.strip()
+        else:
+            source_account_name = name_map.get(source_account) or "Unknown"
+
+        time_str = seed_txn.time or "00:00:00"
+        credits_list.append(CreditTrailInfo(
+            credit_txn_id=get_txn_ident(seed_txn),
+            amount=float(seed_txn.credit),
+            timestamp=f"{seed_txn.date}T{time_str}",
+            source_account=source_account,
+            source_account_name=source_account_name,
+            hops=fifo_hops
+        ))
+
+    return MoneyTrailResponse(credits=credits_list)
 

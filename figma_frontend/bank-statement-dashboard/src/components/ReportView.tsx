@@ -103,10 +103,12 @@ export default function ReportView({
   files,
   uploadResult,
   activeSubView = "reports",
+  onOpenMoneyTrail,
 }: {
   files: File[];
   uploadResult?: UploadResult;
   activeSubView?: "reports" | "graph";
+  onOpenMoneyTrail?: (accountId: string) => void;
 }) {
   const [analytics, setAnalytics] = useState<AnalyticsStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,6 +133,22 @@ export default function ReportView({
   const [totalTxnCount, setTotalTxnCount] = useState<number>(0);
   const [minAmount, setMinAmount] = useState<number>(0);
   const [minDateIndex, setMinDateIndex] = useState<number>(0);
+
+  const handleHighlightNode = (nodeId: string) => {
+    if (cyInstance.current) {
+      const node = cyInstance.current.$id(nodeId);
+      if (node.length > 0) {
+        cyInstance.current.elements().unselect();
+        node.select();
+        cyInstance.current.animate({
+          center: { eles: node },
+          zoom: Math.max(cyInstance.current.zoom(), 1.2),
+          duration: 400
+        });
+        setSelectedNodeData(node.data());
+      }
+    }
+  };
 
   // Load transactions for the selected node
   useEffect(() => {
@@ -743,7 +761,7 @@ export default function ReportView({
                   </div>
                 )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 border border-slate-200 rounded-xl overflow-hidden min-h-[460px]">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 border border-slate-200 rounded-xl overflow-hidden min-h-[460px]">
                 {/* Graph View (Left columns) */}
                 <div className="lg:col-span-2 relative bg-slate-900 overflow-hidden flex flex-col justify-end min-h-[350px] lg:min-h-auto">
                   {/* Grid lines background style */}
@@ -839,43 +857,13 @@ export default function ReportView({
                         </div>
 
                         <div className="border-t border-slate-200 pt-3">
-                          <div className="flex justify-between items-center mb-1">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Transaction Flow Details</p>
-                          </div>
-                          
-                          <div className="max-h-[120px] overflow-y-auto space-y-1.5 pr-1">
-                            {graphData?.edges
-                              .filter(e => e.data.source === selectedNodeData.id || e.data.target === selectedNodeData.id)
-                              .map((e, index) => {
-                                const isIncoming = e.data.target === selectedAccountId;
-                                return (
-                                  <div key={index} className={`flex items-center justify-between p-2 rounded text-[11px] border ${
-                                    e.data.risk_flag === "SUSPICIOUS" 
-                                      ? "bg-red-50/55 border-red-100" 
-                                      : "bg-white border-slate-200"
-                                  }`}>
-                                    <div>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`font-semibold ${isIncoming ? "text-green-600" : "text-blue-600"}`}>
-                                          {isIncoming ? "← Credit" : "→ Debit"}
-                                        </span>
-                                        {e.data.risk_flag === "SUSPICIOUS" && (
-                                          <span className="text-[9px] font-bold text-red-600 uppercase">⚠ Suspicious</span>
-                                        )}
-                                      </div>
-                                      <span className="text-[9px] text-slate-400 block">{e.data.dates.join(", ")}</span>
-                                    </div>
-                                    <span className="font-mono font-bold text-slate-800">
-                                      ₹{e.data.amount.toLocaleString("en-IN")}
-                                    </span>
-                                  </div>
-                                );
-                              })
-                            }
-                            {(!graphData?.edges.some(e => e.data.source === selectedNodeData.id || e.data.target === selectedNodeData.id)) && (
-                              <p className="text-[11px] text-slate-400 text-center py-2">No active flows linked to this seed in the current trace.</p>
-                            )}
-                          </div>
+                          <button
+                            onClick={() => onOpenMoneyTrail && onOpenMoneyTrail(selectedNodeData.id)}
+                            className="w-full flex items-center justify-between rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/10"
+                          >
+                            <span>💰 Open Money Trail for this account</span>
+                            <span>&rarr;</span>
+                          </button>
                         </div>
 
                         <div className="border-t border-slate-200 pt-3 flex flex-col min-h-0">
@@ -923,7 +911,9 @@ export default function ReportView({
                       {!selectedNodeData.is_seed && (
                         <div className="pt-2">
                           <button
-                            onClick={() => setSelectedAccountId(selectedNodeData.id)}
+                            onClick={() => {
+                              setSelectedAccountId(selectedNodeData.id);
+                            }}
                             className="w-full rounded-lg bg-accent text-white hover:bg-blue-600 py-2 text-xs font-semibold shadow-sm transition-colors"
                           >
                             Trace this node's money trail →

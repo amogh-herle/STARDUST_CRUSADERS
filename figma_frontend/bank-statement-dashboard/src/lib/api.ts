@@ -195,3 +195,67 @@ export async function getAccountTransactions(
   return res.json();
 }
 
+export interface SourceCreditAllocation {
+  credit_txn_id: string;
+  amount: number;
+}
+
+export interface SeedCredit {
+  txn_id: string;
+  account_id: string;
+  amount: number;
+  timestamp: string;
+}
+
+export interface MoneyTrailHop {
+  hop_number: number;
+  from_account: string;
+  from_account_name?: string;
+  to_account: string;
+  to_account_name?: string;
+  debit_txn_id: string;
+  amount: number;
+  timestamp: string;
+  source_credit_txn_ids: string[];
+  source_credits: SourceCreditAllocation[];
+  is_commingled: boolean;
+  is_untracked_remainder: boolean;
+  is_cycle: boolean;
+  to_account_risk_tier?: string;
+  to_account_role?: string;
+}
+
+export interface CreditTrailInfo {
+  credit_txn_id: string;
+  amount: number;
+  timestamp: string;
+  source_account: string;
+  source_account_name?: string;
+  hops: MoneyTrailHop[];
+}
+
+export interface MoneyTrailResponse {
+  credits: CreditTrailInfo[];
+}
+
+/**
+ * Fetch the FIFO Money Trail flow tracing results for an account and an optional seed credit transaction ID.
+ */
+export async function getMoneyTrail(
+  accountId: string,
+  creditTxnId?: string
+): Promise<MoneyTrailResponse> {
+  const url = new URL(`${BASE}/api/v1/graph/money-trail/${accountId}`);
+  if (creditTxnId) {
+    url.searchParams.append("credit_txn_id", creditTxnId);
+  }
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = new Error(`Failed to fetch money trail for account ${accountId}`) as any;
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+

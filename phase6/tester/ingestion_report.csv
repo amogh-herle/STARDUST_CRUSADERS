@@ -1,2 +1,2 @@
 file,extension,bank_detected,rows_parsed,rows_after_clean,parse_warnings,status
-image.png,.png,Airtel Payments Bank,14,6, | Bank: Airtel Payments Bank (keyword_fallback) | date=Date | nar=Ref | dr=Debit | cr=None | bal=Balance | Skipped 8 non-transaction rows,ok
+08874795659248.pdf,.pdf,Bandhan Bank,79,77,"PDF table: 79 rows, 7 cols (bank=bandhan) | Bank: Bandhan Bank (ifsc_lookup:BDBL0002295) | date=TRANS DATE | nar=DESCRIPTION | dr=DEBITS | cr=CREDITS | bal=BALANCE | Skipped 2 non-transaction rows",ok

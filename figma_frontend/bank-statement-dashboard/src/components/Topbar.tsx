@@ -10,6 +10,7 @@ const TITLES: Record<View, string> = {
   upload: "Upload bank statements",
   reports: "Reports",
   graph: "Graph View",
+  moneytrail: "Money Trail",
   library: "Library",
 };
 
