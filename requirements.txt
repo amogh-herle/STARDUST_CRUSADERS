@@ -49,9 +49,6 @@ faker==33.1.0
 # Environment
 python-dotenv==1.0.1
 
-# LLM & AI
-google-generative-ai>=0.3.0
-
 # HTTP Client
 requests>=2.31.0
 httpx>=0.24.0

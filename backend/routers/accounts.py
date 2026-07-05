@@ -78,6 +78,30 @@ async def list_accounts(
     )
 
 
+def _is_merchant(node_name: str) -> bool:
+    name_upper = str(node_name).upper().strip()
+    if not name_upper or name_upper in ("NAN", "NONE", "NULL"):
+        return True
+    merchant_keywords = {
+        "AMAZON", "SWIGGY", "IRCTC", "FLIPKART", "ZOMATO", "UBER", "OLA",
+        "ZEPTO", "BLINKIT", "PAYTM", "PHONEPE", "GPAY", "GOOGLE PAY", "BHIM",
+        "CRED", "RAZORPAY", "CASHFREE", "PAYU", "BILLDESK", "PAYU@HDFCBANK",
+        "BDPG@HDFCBANK", "JIO", "AIRTEL", "NETFLIX", "SPOTIFY", "TATACLIQ"
+    }
+    for kw in merchant_keywords:
+        if kw in name_upper:
+            return True
+    utility_keywords = {
+        "HEAD OFFICE", "SELF", "CASH", "ATM", "25 NFS", "OPW", "MOB", 
+        "NEFT", "IMPS", "UPI", "RTGS", "UNKNOWN", "FEE", "CHARGE", "INTEREST",
+        "DECLINE", "MINIMUM BALANCE", "SMS"
+    }
+    for kw in utility_keywords:
+        if kw in name_upper:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Account detail
 # ---------------------------------------------------------------------------
@@ -85,7 +109,33 @@ async def list_accounts(
 async def get_account(account_id: str, db: AsyncSession = Depends(get_db)):
     account = await db.get(Account, account_id)
     if not account:
-        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+        q = select(Transaction).where(
+            or_(
+                Transaction.counterparty_account_id == account_id,
+                Transaction.counterparty_name == account_id
+            )
+        ).limit(1)
+        txn = (await db.execute(q)).scalars().first()
+        if not txn:
+            raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+        
+        is_merch = _is_merchant(account_id)
+        return AccountOut(
+            account_id=account_id,
+            holder_name=account_id,
+            bank_name="External Entity" if not is_merch else "Merchant/Gateway",
+            bank_code=None,
+            ifsc=None,
+            account_number=account_id if account_id.isdigit() else None,
+            persona="Merchant" if is_merch else "External Counterparty",
+            opening_balance=0.0,
+            risk_score=15.0 if is_merch else 40.0,
+            is_suspect=False,
+            fraud_role=None,
+            fraud_ring_id=None,
+            last_scored_at=None,
+            ingested_at=txn.ingested_at,
+        )
     return AccountOut.model_validate(account)
 
 
@@ -104,9 +154,18 @@ async def get_account_transactions(
 ):
     account = await db.get(Account, account_id)
     if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    q = select(Transaction).where(Transaction.account_id == account_id)
+        q = select(Transaction).where(
+            or_(
+                Transaction.counterparty_account_id == account_id,
+                Transaction.counterparty_name == account_id
+            )
+        )
+        count_q = select(func.count()).select_from(q.subquery())
+        total = (await db.execute(count_q)).scalar_one()
+        if total == 0:
+            raise HTTPException(status_code=404, detail="Account not found")
+    else:
+        q = select(Transaction).where(Transaction.account_id == account_id)
 
     if date_from:
         q = q.where(Transaction.date >= date_from)
@@ -149,7 +208,16 @@ async def get_risk_history(
 ):
     account = await db.get(Account, account_id)
     if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+        q = select(Transaction).where(
+            or_(
+                Transaction.counterparty_account_id == account_id,
+                Transaction.counterparty_name == account_id
+            )
+        ).limit(1)
+        txn = (await db.execute(q)).scalars().first()
+        if not txn:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return []
 
     q = (
         select(RiskScoreHistory)
@@ -172,18 +240,25 @@ async def get_counterparties(
 ):
     account = await db.get(Account, account_id)
     if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    # Find all internal counterparty account IDs
-    q = (
-        select(Transaction.counterparty_account_id)
-        .where(
-            Transaction.account_id == account_id,
-            Transaction.counterparty_account_id.isnot(None),
+        q = select(Transaction.account_id).where(
+            or_(
+                Transaction.counterparty_account_id == account_id,
+                Transaction.counterparty_name == account_id
+            )
+        ).distinct()
+        cp_ids = (await db.execute(q)).scalars().all()
+        if not cp_ids:
+            raise HTTPException(status_code=404, detail="Account not found")
+    else:
+        q = (
+            select(Transaction.counterparty_account_id)
+            .where(
+                Transaction.account_id == account_id,
+                Transaction.counterparty_account_id.isnot(None),
+            )
+            .distinct()
         )
-        .distinct()
-    )
-    cp_ids = (await db.execute(q)).scalars().all()
+        cp_ids = (await db.execute(q)).scalars().all()
 
     if not cp_ids:
         return []

@@ -348,8 +348,9 @@ async def get_ledger_trace(account_id: str, db: AsyncSession = Depends(get_db)):
     project_root = Path(__file__).resolve().parents[2]
     dirs_to_try = [
         project_root / "data" / "analytics_v2",
-        project_root / "phase8" / "analytics",
+        project_root / "phase8" / "analytics_v2",
         project_root / "phase8" / "analytics_final",
+        project_root / "phase8" / "analytics",
     ]
     
     json_path = None
@@ -479,6 +480,114 @@ async def get_ledger_trace(account_id: str, db: AsyncSession = Depends(get_db)):
         from models import Transaction, Account
         
         # Query transactions of the account
+        seed_acct = await db.get(Account, account_id)
+        if not seed_acct:
+            txn_stmt = select(Transaction).where(
+                or_(
+                    Transaction.counterparty_account_id == account_id,
+                    Transaction.counterparty_name == account_id
+                )
+            ).order_by(Transaction.date, Transaction.time)
+            cp_txns = (await db.execute(txn_stmt)).scalars().all()
+            if cp_txns:
+                internal_ids = list({t.account_id for t in cp_txns})
+                risk_map = {}
+                if internal_ids:
+                    acct_stmt = select(Account).where(Account.account_id.in_(internal_ids))
+                    db_accts = (await db.execute(acct_stmt)).scalars().all()
+                    for a in db_accts:
+                        risk_map[a.account_id] = {
+                            "risk_score": float(a.risk_score),
+                            "risk_tier": "CRITICAL" if a.risk_score >= 75 else "HIGH" if a.risk_score >= 50 else "MEDIUM" if a.risk_score >= 25 else "LOW"
+                        }
+                
+                from routers.accounts import _is_merchant
+                is_merch = _is_merchant(account_id)
+                seed_score = 15.0 if is_merch else 40.0
+                seed_risk_tier = "LOW" if is_merch else "MEDIUM"
+                
+                nodes = []
+                edges = []
+                added = set()
+                
+                def make_node(nid, is_seed_node=False):
+                    if is_seed_node:
+                        return {
+                            "data": {
+                                "id": nid,
+                                "label": nid,
+                                "bank": "Merchant/Gateway" if is_merch else "External Entity",
+                                "risk_score": seed_score,
+                                "risk_tier": seed_risk_tier,
+                                "role": "merchant" if is_merch else "counterparty",
+                                "is_seed": True,
+                                "is_internal": False
+                            }
+                        }
+                    risk_info = risk_map.get(nid, {})
+                    risk_score = risk_info.get("risk_score", 0.0)
+                    risk_tier = risk_info.get("risk_tier", "LOW")
+                    return {
+                        "data": {
+                            "id": nid,
+                            "label": nid,
+                            "bank": "UNKNOWN Bank",
+                            "risk_score": risk_score,
+                            "risk_tier": risk_tier,
+                            "role": "unknown",
+                            "is_seed": False,
+                            "is_internal": True
+                        }
+                    }
+                
+                nodes.append(make_node(account_id, is_seed_node=True))
+                added.add(account_id)
+                
+                edge_map = {}
+                for row in cp_txns:
+                    src = row.account_id
+                    dst = account_id
+                    debit_amt = float(row.debit or 0.0)
+                    credit_amt = float(row.credit or 0.0)
+                    
+                    if debit_amt > 0:
+                        edge_src = src
+                        edge_dst = dst
+                        amt = debit_amt
+                    else:
+                        edge_src = dst
+                        edge_dst = src
+                        amt = credit_amt
+                        
+                    date = str(row.date or "")
+                    has_flags = row.is_high_value_flag or row.is_balance_breach or (row.final_risk_score and row.final_risk_score >= 0.7)
+                    risk_flag = 'SUSPICIOUS' if has_flags else 'NORMAL'
+                    
+                    k = (edge_src, edge_dst)
+                    if k not in edge_map:
+                        edge_map[k] = {"amount": 0.0, "dates": set(), "risks": set()}
+                    edge_map[k]["amount"] += amt
+                    edge_map[k]["dates"].add(date)
+                    edge_map[k]["risks"].add(risk_flag)
+                    
+                    if src not in added:
+                        nodes.append(make_node(src))
+                        added.add(src)
+                        
+                for idx, ((s, t), info) in enumerate(edge_map.items()):
+                    edges.append({
+                        "data": {
+                            "id": f"e_{account_id}_{idx}",
+                            "source": s,
+                            "target": t,
+                            "amount": info["amount"],
+                            "dates": sorted(list(info["dates"])),
+                            "risk_flag": "SUSPICIOUS" if "SUSPICIOUS" in info["risks"] else "NORMAL"
+                        }
+                    })
+                    
+                return {"nodes": nodes, "edges": edges}
+
         txn_stmt = select(Transaction).where(Transaction.account_id == account_id).order_by(Transaction.date, Transaction.time)
         db_txns = (await db.execute(txn_stmt)).scalars().all()
         

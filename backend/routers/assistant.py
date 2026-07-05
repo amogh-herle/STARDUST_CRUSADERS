@@ -17,7 +17,14 @@ from schemas import AssistantChatRequest, AssistantChatResponse
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
 
-analytics_root = Path(__file__).resolve().parents[2] / "phase8" / "analytics"
+project_root = Path(__file__).resolve().parents[2]
+analytics_root = project_root / "data" / "analytics_v2"
+if not (analytics_root / "risk_scores.csv").exists():
+    for d in ["analytics_v2", "analytics_final", "analytics"]:
+        path = project_root / "phase8" / d
+        if (path / "risk_scores.csv").exists():
+            analytics_root = path
+            break
 
 from services.qwen_assistant_service import QwenAssistantService
 
