@@ -11,12 +11,35 @@ TRAIL_MAX_HOPS = 8
 TRAIL_MIN_MATCH_RATIO = 0.10
 TRAIL_MAX_HOP_HOURS = 72
 
-# Round-trip detection
+# Round-trip detection (direct A->B->A pair, 2-hop only)
 ROUND_TRIP_MAX_DAYS = 30
 ROUND_TRIP_MIN_RETURN_RATIO = 0.65
 ROUND_TRIP_MAX_RETURN_RATIO = 1.35
 ROUND_TRIP_TOP_QUANTILE = 0.60
 ROUND_TRIP_MAX_FINDINGS_PER_PAIR = 3
+
+# Multi-hop round-trip / cycle detection (A->B->C->...->A, 3+ hops).
+# Complements detect_round_trips(), which by construction can only ever
+# find the direct 2-hop case because it requires the return credit's
+# counterparty to equal the original debit's counterparty. Genuine
+# layered round-tripping (money routed through 2+ intermediary accounts
+# before coming back) needs an actual cycle search over the transaction
+# graph, respecting chronological order and amount conservation at every
+# hop so unrelated coincidental edges don't get chained together.
+ROUND_TRIP_CYCLE_MIN_HOPS = 3          # edges; 3 = A->B->C->A (1+ intermediaries beyond the direct pair)
+ROUND_TRIP_CYCLE_MAX_HOPS = 6
+ROUND_TRIP_CYCLE_MAX_DAYS = 45         # total elapsed time allowed start->close of the cycle
+ROUND_TRIP_CYCLE_MAX_HOP_HOURS = 96    # max gap between any two consecutive hops
+ROUND_TRIP_CYCLE_MIN_KEEP_RATIO = 0.55 # each hop must retain >=55% of the previous hop's amount
+ROUND_TRIP_CYCLE_CLOSE_MIN_RATIO = 0.55  # closing leg vs. the ORIGINAL seed amount
+ROUND_TRIP_CYCLE_CLOSE_MAX_RATIO = 1.45
+ROUND_TRIP_CYCLE_TOP_QUANTILE = 0.20   # low floor: the per-hop decay ratio + closing ratio
+                                        # band below do the real noise filtering here. A high
+                                        # floor mostly costs recall, because a single account
+                                        # with one large unrelated transaction otherwise raises
+                                        # its own per-account floor enough to hide a genuine,
+                                        # smaller round-trip it also took part in.
+ROUND_TRIP_CYCLE_MAX_FINDINGS = 500
 
 # Layering detection
 LAYERING_MIN_CHAIN = 3
@@ -91,6 +114,6 @@ ANALYTICS_FLAG_COLS = [
     "clean_flags", "is_duplicate", "is_balance_breach",
     "is_high_value_flag", "is_ocr_row", "is_velocity_flag",
     "is_utr_collision", "is_self_transfer", "is_malformed_ifsc",
-    "is_round_trip", "is_layering", "is_fan_in", "is_fan_out",
+    "is_round_trip", "is_round_trip_cycle", "is_layering", "is_fan_in", "is_fan_out",
     "is_smurfing", "is_odd_hour", "analytics_flags",
 ]

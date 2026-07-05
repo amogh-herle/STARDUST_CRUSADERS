@@ -6,7 +6,8 @@ Input : cleaned_transactions.csv  (Phase 7 output)
 Output directory contains:
 
   analytics_transactions.csv     ← original rows + all Phase 8 flags
-  round_trips.csv                ← every detected round-trip
+  round_trips.csv                ← every detected direct (2-hop) round-trip
+  round_trip_cycles.csv          ← every detected multi-hop (3+ hop) round-trip cycle
   layering_chains.csv            ← every detected layering chain
   fan_in.csv                     ← collector account findings
   fan_out.csv                    ← distribution account findings
@@ -37,7 +38,7 @@ from pathlib import Path
 
 from graph_builder    import build_graphs, graph_summary
 from pattern_detectors import (
-    detect_round_trips, detect_layering,
+    detect_round_trips, detect_round_trip_cycles, detect_layering,
     detect_fan_in, detect_fan_out,
     detect_smurfing, detect_odd_hours,
 )
@@ -93,6 +94,7 @@ def run_analytics(
 
     # Initialise Phase 8 flag columns
     df["is_round_trip"]    = False
+    df["is_round_trip_cycle"] = False
     df["is_layering"]      = False
     df["is_fan_in"]        = False
     df["is_fan_out"]       = False
@@ -134,6 +136,15 @@ def run_analytics(
     report["round_trips"] = len(rt_findings)
     print(f"        Found : {len(rt_findings)} round-trips "
           f"({len(rt_idx)} transactions flagged)")
+
+    # ── Step 2b: Multi-hop round-trip cycle detection (3+ hops) ────────
+    print("\n  [2b/8] Multi-hop round-trip cycle detection (A->B->C->...->A) ...")
+    rtc_findings, rtc_idx = detect_round_trip_cycles(df, txn_graph)
+    df.loc[list(rtc_idx), "is_round_trip_cycle"] = True
+    _append_flag(df, list(rtc_idx), "ROUND_TRIP_CYCLE")
+    report["round_trip_cycles"] = len(rtc_findings)
+    print(f"        Found : {len(rtc_findings)} multi-hop round-trip cycles "
+          f"({len(rtc_idx)} transactions flagged)")
 
     # ── Step 3: Layering detection ─────────────────────────────────────
     print("\n  [3/8] Layering chain detection ...")
@@ -323,6 +334,7 @@ def run_analytics(
 
     # 2. Per-pattern finding files
     _save(rt_findings,  os.path.join(out_dir, "round_trips.csv"))
+    _save(rtc_findings, os.path.join(out_dir, "round_trip_cycles.csv"))
     _save(lay_findings, os.path.join(out_dir, "layering_chains.csv"))
     _save(fi_findings,  os.path.join(out_dir, "fan_in.csv"))
     _save(fo_findings,  os.path.join(out_dir, "fan_out.csv"))
@@ -357,14 +369,14 @@ def run_analytics(
     # 6. Full analytics report
     report["rows_output"] = len(df)
     report["total_flagged_rows"] = int(
-        df[["is_round_trip", "is_layering", "is_fan_in",
+        df[["is_round_trip", "is_round_trip_cycle", "is_layering", "is_fan_in",
             "is_fan_out", "is_smurfing", "is_odd_hour"]].any(axis=1).sum()
     )
     with open(os.path.join(out_dir, "analytics_report.json"), "w") as f:
         json.dump(report, f, indent=2, default=str)
 
     # 7. Human-readable summary
-    _write_summary(report, risk_df, rt_findings, lay_findings,
+    _write_summary(report, risk_df, rt_findings, rtc_findings, lay_findings,
                    fi_findings, fo_findings, sm_findings, oh_findings, out_dir)
 
     _print_final_summary(report, out_dir)
@@ -401,7 +413,7 @@ def _trail_cols() -> list[str]:
 
 def _write_summary(
     report, risk_df,
-    rt, lay, fi, fo, sm, oh,
+    rt, rtc, lay, fi, fo, sm, oh,
     out_dir,
 ):
     lines = [
@@ -425,7 +437,8 @@ def _write_summary(
         "",
         "PATTERN DETECTION RESULTS",
         "-" * 40,
-        f"  Round-trips             : {len(rt)}",
+        f"  Round-trips (2-hop)     : {len(rt)}",
+        f"  Round-trip cycles (3+ hop): {len(rtc)}",
         f"  Layering chains         : {len(lay)}",
         f"  Fan-in collectors       : {len(fi)}",
         f"  Fan-out distributors    : {len(fo)}",
@@ -479,7 +492,8 @@ def _write_summary(
         "  account_graph.pkl            ← NetworkX DiGraph → feed directly to Phase 9",
         "  account_graph.gexf           ← export for graph visualization tools",
         "  analytics_transactions.csv   ← all rows + Phase 8 flags → Feed to Phase 9/10",
-        "  round_trips.csv              ← round-trip findings",
+        "  round_trips.csv              ← direct (2-hop) round-trip findings",
+        "  round_trip_cycles.csv        ← multi-hop (3+ hop) round-trip cycle findings",
         "  layering_chains.csv          ← layering chain findings",
         "  fan_in.csv                   ← collector account findings",
         "  fan_out.csv                  ← distribution account findings",
@@ -505,6 +519,7 @@ def _print_final_summary(report, out_dir):
     print("  PHASE 8 COMPLETE")
     print(f"{'='*65}")
     print(f"  Round-trips detected     : {report['round_trips']}")
+    print(f"  Round-trip cycles (3+ hop): {report.get('round_trip_cycles', 0)}")
     print(f"  Layering chains detected : {report['layering_chains']}")
     print(f"  Fan-in collectors        : {report['fan_in']}")
     print(f"  Fan-out distributors     : {report['fan_out']}")

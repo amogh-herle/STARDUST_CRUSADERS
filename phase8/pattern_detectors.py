@@ -93,6 +93,153 @@ def detect_round_trips(df: pd.DataFrame, txn_graph: nx.MultiDiGraph) -> tuple[li
     return findings, flagged_idx
 
 
+def detect_round_trip_cycles(df: pd.DataFrame, txn_graph: nx.MultiDiGraph) -> tuple[list[dict], set]:
+    """
+    Multi-hop round-trip detector: A -> B -> C -> ... -> A (3 to
+    ROUND_TRIP_CYCLE_MAX_HOPS edges).
+
+    detect_round_trips() above can only ever surface the direct 2-hop
+    case (A sends to B, B sends back to A) because it explicitly requires
+    the return leg's counterparty to equal the original debit's
+    counterparty. It never walks the graph, so a launderer who routes
+    money through one or more intermediary "layering" accounts before it
+    comes back to the source is invisible to it. This function finds
+    those longer cycles by doing a bounded DFS over internal-to-internal
+    edges in txn_graph (same edge index style as detect_layering) and,
+    at every step, checking whether the next hop closes back on the
+    account that originated the cycle.
+
+    A candidate cycle must satisfy, simultaneously:
+      - chronological order: each hop's timestamp is after the previous hop's
+      - total elapsed time <= ROUND_TRIP_CYCLE_MAX_DAYS
+      - per-hop gap <= ROUND_TRIP_CYCLE_MAX_HOP_HOURS (no dangling old edges)
+      - amount conservation: each hop retains >= ROUND_TRIP_CYCLE_MIN_KEEP_RATIO
+        of the previous hop's amount (so it isn't just noise threaded together)
+      - the closing leg's amount is within
+        [ROUND_TRIP_CYCLE_CLOSE_MIN_RATIO, ROUND_TRIP_CYCLE_CLOSE_MAX_RATIO]
+        of the ORIGINAL seed amount (so the loop is actually "the same money"
+        coming back, not an unrelated transfer that happens to close a path)
+      - every account in the cycle is distinct (simple cycle, no repeats)
+
+    Returns (findings, flagged_idx) in the same shape as the other detectors.
+    """
+    from analytics_config import (
+        ROUND_TRIP_CYCLE_MIN_HOPS, ROUND_TRIP_CYCLE_MAX_HOPS,
+        ROUND_TRIP_CYCLE_MAX_DAYS, ROUND_TRIP_CYCLE_MAX_HOP_HOURS,
+        ROUND_TRIP_CYCLE_MIN_KEEP_RATIO, ROUND_TRIP_CYCLE_CLOSE_MIN_RATIO,
+        ROUND_TRIP_CYCLE_CLOSE_MAX_RATIO, ROUND_TRIP_CYCLE_TOP_QUANTILE,
+        ROUND_TRIP_CYCLE_MAX_FINDINGS,
+    )
+
+    findings, flagged_idx = [], set()
+    internal_nodes = {n for n, data in txn_graph.nodes(data=True) if data.get("is_internal")}
+    if len(internal_nodes) < ROUND_TRIP_CYCLE_MIN_HOPS:
+        return findings, flagged_idx
+
+    edge_index = defaultdict(list)
+    for u, v, data in txn_graph.edges(data=True):
+        if u not in internal_nodes or v not in internal_nodes:
+            continue
+        edge_index[u].append((data["timestamp"], v, float(data["amount"]), data.get("row_idx")))
+    for src in edge_index:
+        edge_index[src].sort(key=lambda x: x[0])
+
+    if not edge_index:
+        return findings, flagged_idx
+
+    # Per-source-account floor (not one dataset-wide floor) so a small
+    # mule ring isn't masked just because one large, unrelated account
+    # also happens to be in the graph.
+    amount_floor = {
+        src: float(np.quantile([e[2] for e in edges], ROUND_TRIP_CYCLE_TOP_QUANTILE))
+        for src, edges in edge_index.items()
+        if len(edges) >= 5  # too few points to make a stable quantile; don't floor them
+    }
+
+    raw_cycles = []
+
+    def dfs(start, node, path, visited, last_ts, first_ts, seed_amt, last_amt, idxs):
+        if len(raw_cycles) >= ROUND_TRIP_CYCLE_MAX_FINDINGS * 4:
+            return
+        for ts, dst, amt, row_idx in edge_index.get(node, []):
+            if amt < amount_floor.get(node, 0.0):
+                continue
+            if path:
+                if ts <= last_ts:
+                    continue
+                if (ts - last_ts).total_seconds() / 3600 > ROUND_TRIP_CYCLE_MAX_HOP_HOURS:
+                    continue
+                if (ts - first_ts).days > ROUND_TRIP_CYCLE_MAX_DAYS:
+                    continue
+                if last_amt > 0 and (amt / last_amt) < ROUND_TRIP_CYCLE_MIN_KEEP_RATIO:
+                    continue
+
+            new_path = path + [(node, dst, amt, ts, row_idx)]
+
+            if dst == start and len(new_path) >= ROUND_TRIP_CYCLE_MIN_HOPS:
+                ratio = amt / seed_amt if seed_amt > 0 else 0
+                if ROUND_TRIP_CYCLE_CLOSE_MIN_RATIO <= ratio <= ROUND_TRIP_CYCLE_CLOSE_MAX_RATIO:
+                    raw_cycles.append((list(new_path), ratio))
+                # A cycle can still legitimately continue on to a longer
+                # loop through the same start node again, but to keep this
+                # a *simple* cycle search we stop extending here.
+                continue
+
+            if dst in visited or len(new_path) >= ROUND_TRIP_CYCLE_MAX_HOPS:
+                continue
+
+            dfs(start, dst, new_path, visited | {dst}, ts,
+                first_ts if path else ts, seed_amt if path else amt, amt, idxs + [row_idx])
+
+    for start in list(edge_index):
+        dfs(start, start, [], {start}, None, None, 0.0, 0.0, [])
+
+    # Deduplicate cycles that are rotations of each other (A->B->C->A found
+    # starting the walk from A, B, or C should count once).
+    seen_keys = set()
+    deduped = []
+    for cycle, ratio in raw_cycles:
+        accounts = [hop[0] for hop in cycle]
+        min_i = accounts.index(min(accounts, key=str))
+        canon = tuple(accounts[min_i:] + accounts[:min_i])
+        if canon in seen_keys:
+            continue
+        seen_keys.add(canon)
+        deduped.append((cycle, ratio))
+
+    deduped.sort(key=lambda c: (len(c[0]), c[0][0][3]), reverse=True)
+
+    for cycle, ratio in deduped[:ROUND_TRIP_CYCLE_MAX_FINDINGS]:
+        accounts = [hop[0] for hop in cycle] + [cycle[-1][1]]
+        amounts = [hop[2] for hop in cycle]
+        dates = [str(hop[3].date()) for hop in cycle]
+        idxs = [hop[4] for hop in cycle if hop[4] is not None]
+        elapsed_days = (cycle[-1][3] - cycle[0][3]).total_seconds() / 86400
+        findings.append({
+            "pattern": "ROUND_TRIP_CYCLE",
+            "hop_count": len(cycle),
+            "cycle": " -> ".join(str(a) for a in accounts),
+            "accounts": accounts,
+            "seed_account": accounts[0],
+            "seed_amount": round(amounts[0], 2),
+            "closing_amount": round(amounts[-1], 2),
+            "closing_ratio": round(float(ratio), 4),
+            "hop_amounts": [round(a, 2) for a in amounts],
+            "hop_dates": dates,
+            "elapsed_days": round(elapsed_days, 1),
+            "row_indices": idxs,
+            "severity": "CRITICAL" if len(cycle) >= 4 else "HIGH",
+            "description": (
+                f"{len(cycle)}-hop round trip: {' -> '.join(str(a) for a in accounts)} "
+                f"starting {amounts[0]:,.2f}, closing {amounts[-1]:,.2f} "
+                f"({ratio:.0%} of seed) after {elapsed_days:.1f} days"
+            ),
+        })
+        flagged_idx.update(idxs)
+
+    return findings, flagged_idx
+
+
 def detect_layering(df: pd.DataFrame, txn_graph: nx.MultiDiGraph) -> tuple[list[dict], set]:
     findings, flagged_idx = [], set()
     internal_nodes = {n for n, data in txn_graph.nodes(data=True) if data.get("is_internal")}
