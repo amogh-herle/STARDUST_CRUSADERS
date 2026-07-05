@@ -14,7 +14,8 @@ const TITLES: Record<View, string> = {
   library: "Library",
 };
 
-type Case = {
+// Exported so it can be used in UploadZone
+export type Case = {
   id: string;
   case_name: string;
   case_number: string;
@@ -39,8 +40,9 @@ const STATUS_COLORS: Record<string, string> = {
   archived: "text-gray-400",
 };
 
-// ─── New Case Modal ───────────────────────────────────────────────────────────
-function NewCaseModal({
+// ─── New Case Modal ─────────────────────────────────────────────────────────── 
+// Exported so it can be used in UploadZone after file upload
+export function NewCaseModal({
   userId,
   onClose,
   onCreated,
@@ -198,7 +200,7 @@ function NewCaseModal({
 // ─── Topbar ───────────────────────────────────────────────────────────────────
 export default function Topbar({ view }: { view: View }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [showNewCase, setShowNewCase] = useState(false);
+  // Removed showNewCase state - New Case button removed from topbar
   const [user, setUser] = useState<AuthUser | null>(null);
   const [cases, setCases] = useState<Case[]>([]);
   const [loadingCases, setLoadingCases] = useState(false);
@@ -250,9 +252,7 @@ export default function Topbar({ view }: { view: View }) {
     router.refresh();
   };
 
-  const handleCaseCreated = (newCase: Case) => {
-    setCases((prev) => [newCase, ...prev]);
-  };
+  // Removed handleCaseCreated - cases will be created from UploadZone now
 
   return (
     <>
@@ -265,12 +265,7 @@ export default function Topbar({ view }: { view: View }) {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowNewCase(true)}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600 transition-colors"
-          >
-            New case
-          </button>
+          {/* Removed New Case button - will now appear after file upload */}
 
           <div className="relative" ref={menuRef}>
             <button
@@ -300,17 +295,7 @@ export default function Topbar({ view }: { view: View }) {
                     <p className="text-xs text-gray-400 text-center py-4">Loading...</p>
                   ) : cases.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-4">
-                      No cases yet.{" "}
-                      <button
-                        onClick={() => {
-                          setShowProfileMenu(false);
-                          setShowNewCase(true);
-                        }}
-                        className="text-accent hover:underline"
-                      >
-                        Create one
-                      </button>{" "}
-                      to get started.
+                      No cases yet. Upload statements to create your first case.
                     </p>
                   ) : (
                     <div className="max-h-64 overflow-y-auto space-y-2">
@@ -368,13 +353,7 @@ export default function Topbar({ view }: { view: View }) {
         </div>
       </header>
 
-      {showNewCase && user && (
-        <NewCaseModal
-          userId={user.id}
-          onClose={() => setShowNewCase(false)}
-          onCreated={handleCaseCreated}
-        />
-      )}
+      {/* Removed NewCaseModal from here - it will be shown in UploadZone after upload */}
     </>
   );
 }
