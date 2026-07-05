@@ -279,3 +279,55 @@ class DashboardStats(BaseModel):
     open_investigations: int
     total_amount_at_risk: float
     banks_covered: list[str]
+
+
+# ---------------------------------------------------------------------------
+# FIFO Money Trail
+# ---------------------------------------------------------------------------
+class SeedCredit(BaseModel):
+    txn_id: str
+    account_id: str
+    amount: float
+    timestamp: str
+
+
+class SourceCreditAllocation(BaseModel):
+    credit_txn_id: str
+    amount: float
+
+
+class MoneyTrailHop(BaseModel):
+    hop_number: int
+    from_account: str
+    from_account_name: Optional[str] = None
+    to_account: str
+    to_account_name: Optional[str] = None
+    debit_txn_id: str
+    amount: float
+    timestamp: str
+    source_credit_txn_ids: list[str]
+    source_credits: list[SourceCreditAllocation] = []
+    is_commingled: bool
+    is_untracked_remainder: bool
+    is_cycle: bool
+    to_account_risk_tier: Optional[str] = None
+    to_account_role: Optional[str] = None
+
+
+class MoneyTrailNode(BaseModel):
+    account_id: str
+    role: str  # "seed" | "intermediate" | "exit"
+
+
+class CreditTrailInfo(BaseModel):
+    credit_txn_id: str
+    amount: float
+    timestamp: str
+    source_account: str
+    source_account_name: Optional[str] = None
+    hops: list[MoneyTrailHop]
+
+
+class MoneyTrailResponse(BaseModel):
+    credits: list[CreditTrailInfo]
+

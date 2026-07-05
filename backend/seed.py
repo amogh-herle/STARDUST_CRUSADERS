@@ -140,6 +140,23 @@ async def sync_analytics_to_db(db: AsyncSession, risk_scores_csv: str, community
         if not acct_id:
             continue
             
+        if acct_id not in accounts_map:
+            existing_acct = await db.get(Account, acct_id)
+            if not existing_acct:
+                acct = Account(
+                    account_id=acct_id,
+                    holder_name="Unknown Holder",
+                    bank_name="Unknown Bank",
+                    risk_score=0.0,
+                    is_suspect=False,
+                    last_scored_at=utcnow(),
+                )
+                db.add(acct)
+                await db.flush()
+                accounts_map[acct_id] = acct
+            else:
+                accounts_map[acct_id] = existing_acct
+
         txn = Transaction(
             account_id=acct_id,
             date=_f("date"),

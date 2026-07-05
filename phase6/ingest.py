@@ -161,10 +161,9 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
     out_dir.mkdir(parents=True, exist_ok=True)
     report_rows = []
     out_csv = out_dir / "ingested_transactions.csv"
-    dup_csv = out_dir / "removed_duplicate_rows.csv"
     report_csv = out_dir / "ingestion_report.csv"
 
-    for path in (out_csv, dup_csv, report_csv):
+    for path in (out_csv, report_csv):
         if path.exists():
             path.unlink()
 
@@ -180,8 +179,6 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
     ]).to_csv(out_csv, index=False)
 
     transactions_written = 0
-    duplicate_rows_removed = 0
-    seen_transaction_keys = set()
     banks_detected = set()
     formats_ingested = set()
 
@@ -196,14 +193,6 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
         if df is None or df.empty:
             return
         df.to_csv(path, mode="a", index=False, header=False)
-
-    def _transaction_keys(df: pd.DataFrame):
-        key_frame = df[["account_id", "date", "narration", "debit", "credit"]].copy()
-        for column in ("account_id", "date", "narration"):
-            key_frame[column] = key_frame[column].fillna("").astype(str)
-        for column in ("debit", "credit"):
-            key_frame[column] = pd.to_numeric(key_frame[column], errors="coerce").fillna(0.0).round(2)
-        return list(key_frame.itertuples(index=False, name=None))
 
     # Generic name fallback: if a PDF's account holder couldn't be extracted
     # from the statement header, give it a stable "Person N" label instead
@@ -237,7 +226,7 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
         return df
 
     def _write_normalized_rows(df: pd.DataFrame):
-        nonlocal transactions_written, duplicate_rows_removed
+        nonlocal transactions_written
 
         if df is None or df.empty:
             return
@@ -247,25 +236,8 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
         banks_detected.update(str(v) for v in df["bank_name"].dropna().unique() if str(v))
         formats_ingested.update(str(v) for v in df["source_format"].dropna().unique() if str(v))
 
-        keys = _transaction_keys(df)
-        keep_mask = []
-        for key in keys:
-            if key in seen_transaction_keys:
-                keep_mask.append(False)
-                duplicate_rows_removed += 1
-            else:
-                seen_transaction_keys.add(key)
-                keep_mask.append(True)
-
-        keep_mask_series = pd.Series(keep_mask, index=df.index)
-        kept_rows = df.loc[keep_mask_series].reset_index(drop=True)
-        duplicate_rows = df.loc[~keep_mask_series].reset_index(drop=True)
-
-        _append_df_to_csv(kept_rows, out_csv)
-        transactions_written += len(kept_rows)
-
-        if not duplicate_rows.empty:
-            _append_df_to_csv(duplicate_rows, dup_csv)
+        _append_df_to_csv(df, out_csv)
+        transactions_written += len(df)
 
     if workers is None or workers <= 1:
         iterable = ((idx + 1, file_path, ingest_file(file_path, pdf_password, pdf_password_candidates))
@@ -475,17 +447,15 @@ def _run_pipeline(files: list, out_dir: str, pdf_password: str = None,
     _print_summary(
         report_rows,
         transactions_written,
-        duplicate_rows_removed,
         banks_detected,
         formats_ingested,
         out_dir,
         out_csv,
-        dup_csv if duplicate_rows_removed else None,
     )
     return report_df
 
 
-def _print_summary(report_rows, transactions_written, dedup_removed, banks_detected, formats_ingested, out_dir, out_csv, dup_csv=None):
+def _print_summary(report_rows, transactions_written, banks_detected, formats_ingested, out_dir, out_csv):
     total = len(report_rows)
     # status can stay "ok" even when normalize() extracted zero usable
     # rows (it only flips to "normalization_error"/"empty" on an actual
@@ -510,13 +480,9 @@ def _print_summary(report_rows, transactions_written, dedup_removed, banks_detec
     print(f"  Skipped           : {skipped}")
     print(f"  Password-protected: {len(password_protected)}")
     if transactions_written > 0:
-        print(f"Total rows ingested : {transactions_written + dedup_removed}")
-        print(f"Duplicates removed  : {dedup_removed}")
-        print(f"Final clean rows    : {transactions_written}")
+        print(f"Total rows ingested : {transactions_written}")
         print(f"Banks detected      : {', '.join(sorted(banks_detected))}")
         print(f"Formats ingested    : {', '.join(sorted(formats_ingested))}")
-        if dedup_removed:
-            print(f"Duplicate rows saved: {os.path.join(out_dir, 'removed_duplicate_rows.csv')}")
     if password_protected:
         print(f"\n  ⚠ These files need a password — re-run with --pdf-password")
         print(f"    or --pdf-passwords to supply one or more candidates:")
@@ -525,8 +491,6 @@ def _print_summary(report_rows, transactions_written, dedup_removed, banks_detec
     print(f"\nOutputs written to: {os.path.abspath(out_dir)}")
     print(f"  ingested_transactions.csv")
     print(f"  ingestion_report.csv")
-    if dup_csv is not None:
-        print(f"  removed_duplicate_rows.csv")
     print(f"{'='*60}\n")
 
 
