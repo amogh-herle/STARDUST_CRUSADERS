@@ -15,7 +15,7 @@ import subprocess
 import shutil
 import pandas as pd
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks, Query
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,6 +86,7 @@ async def get_analytics_status():
 async def upload_statements(
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
+    workers: int = Query(4, description="Number of worker processes for parallel ingestion"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -124,7 +125,7 @@ async def upload_statements(
 
     # Run pipeline synchronously (for hackathon demo; use BackgroundTasks for production)
     ingested_path, cleaned_path, analytics_out, pipeline_report = _run_pipeline(
-        upload_dir, upload_id, warnings
+        upload_dir, upload_id, warnings, workers=workers
     )
 
     if not cleaned_path or not os.path.exists(cleaned_path):
@@ -148,7 +149,7 @@ async def upload_statements(
     )
 
 
-def _run_pipeline(upload_dir: str, upload_id: str, warnings: list) -> tuple:
+def _run_pipeline(upload_dir: str, upload_id: str, warnings: list, workers: int = 4) -> tuple:
     """Run Phase 6 + Phase 7 + Phase 8 as subprocess calls."""
     import sys
     from pathlib import Path
@@ -174,7 +175,8 @@ def _run_pipeline(upload_dir: str, upload_id: str, warnings: list) -> tuple:
         result = subprocess.run(
             [python_exe, phase6_script,
              "--input", upload_dir,
-             "--out-dir", ingested_dir],
+             "--out-dir", ingested_dir,
+             "--workers", str(workers)],
             capture_output=True, text=True, timeout=120,
             cwd=str(project_root / "phase6"),
         )
