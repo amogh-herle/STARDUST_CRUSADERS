@@ -143,6 +143,15 @@ export async function getLedgerTrace(accountId: string): Promise<CytoscapeGraph>
 }
 
 /**
+ * Fetch the 1-hop ego-graph expansion for a given account.
+ */
+export async function getFundTrace(accountId: string, hops: number = 1): Promise<any> {
+  const res = await fetch(`${BASE}/api/v1/graph/fund-trace/${accountId}?hops=${hops}`);
+  if (!res.ok) throw new Error(`Failed to fetch fund trace for account ${accountId}`);
+  return res.json();
+}
+
+/**
  * Fetch the full overview transaction graph (paginated by accounts count).
  */
 export async function getFullGraph(limitAccounts: number = 10): Promise<CytoscapeGraph> {

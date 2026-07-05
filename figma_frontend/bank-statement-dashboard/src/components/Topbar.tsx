@@ -19,6 +19,7 @@ export type Case = {
   id: string;
   case_name: string;
   case_number: string;
+  description?: string | null;
   status: string;
   priority: string;
   created_at: string;

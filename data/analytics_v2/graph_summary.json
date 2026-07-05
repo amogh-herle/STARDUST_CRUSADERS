@@ -1,4 +1,5 @@
 {
+<<<<<<< Updated upstream
   "txn_graph_nodes": 54,
   "txn_graph_edges": 274,
   "account_graph_nodes": 54,
@@ -7,4 +8,14 @@
   "external_counterparty_nodes": 53,
   "weakly_connected_comps": 1,
   "density": 0.019217
+=======
+  "txn_graph_nodes": 12686,
+  "txn_graph_edges": 14406,
+  "account_graph_nodes": 12686,
+  "account_graph_edges": 12766,
+  "internal_account_nodes": 18,
+  "external_counterparty_nodes": 12668,
+  "weakly_connected_comps": 6,
+  "density": 7.9e-05
+>>>>>>> Stashed changes
 }

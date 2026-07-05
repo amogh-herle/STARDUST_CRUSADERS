@@ -8,12 +8,33 @@ import {
   getLedgerTrace,
   getAccountTransactions,
   getFullGraph,
+  getFundTrace,
   type AnalyticsStatus,
   type TopAccount,
   type UploadResult,
   type CytoscapeGraph,
   type Transaction,
 } from "@/lib/api";
+import {
+  RISK_TIER_COLORS,
+  DEFAULT_NODE_COLOR,
+  NODE_BORDER_COLOR,
+  EDGE_COLORS,
+} from "@/lib/constants";
+
+function getRiskTier(score: number): "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" {
+  if (score >= 75) return "CRITICAL";
+  if (score >= 50) return "HIGH";
+  if (score >= 25) return "MEDIUM";
+  return "LOW";
+}
+
+function formatCurrencyShort(amount: number): string {
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
+  if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
+  return `₹${amount}`;
+}
 
 // ── Stat card ────────────────────────────────────────────────────────────────
 
@@ -125,8 +146,12 @@ export default function ReportView({
   const [selectedNodeData, setSelectedNodeData] = useState<any>(null);
   const [nodeTransactions, setNodeTransactions] = useState<Transaction[]>([]);
   const [nodeTransactionsLoading, setNodeTransactionsLoading] = useState(false);
-  const [layoutName, setLayoutName] = useState<string>("concentric");
+  const [layoutName, setLayoutName] = useState<string>("cose");
   const cyInstance = useRef<cytoscape.Core | null>(null);
+  const isExpandingRef = useRef(false);
+  const [expandedNodesState, setExpandedNodesState] = useState<Set<string>>(new Set());
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [hasGraphError, setHasGraphError] = useState(false);
 
   // Incremental / Overview graph states
   const [isOverviewMode, setIsOverviewMode] = useState(true);
@@ -179,6 +204,15 @@ export default function ReportView({
         setNodeTransactionsLoading(false);
       });
   }, [selectedNodeData]);
+
+  // Auto-hide toast messages
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
 
   // Auto-set target date when entering isolated mode
   useEffect(() => {
@@ -266,10 +300,19 @@ export default function ReportView({
           };
         });
 
+        const initialExpanded = new Set<string>();
+        normalizedNodes.forEach((n: any) => {
+          if (n.is_expanded || n.is_known_account || n.is_seed) {
+            initialExpanded.add(n.id);
+          }
+        });
+        setExpandedNodes(initialExpanded);
+
         setGraphData({ nodes: normalizedNodes, edges: normalizedEdges } as any);
       })
       .catch((err) => {
         console.error("Failed to load overview graph:", err);
+        setHasGraphError(true);
       })
       .finally(() => {
         setGraphLoading(false);
@@ -390,21 +433,21 @@ export default function ReportView({
         data: {
           id: String(n.id),
           label: n.label || n.id,
-          account_holder: n.account_holder,
-          is_known_account: n.is_known_account,
-          role: n.role,
-          total_transactions: n.total_transactions,
-          total_received: n.total_received,
-          total_forwarded: n.total_forwarded,
+          account_holder: n.account_holder || n.label || "",
+          is_known_account: n.is_known_account || n.is_seed || false,
+          role: n.role || n.fraud_role || "",
+          total_transactions: n.total_transactions || n.txn_count || 0,
+          total_received: n.total_received || n.total_credit || 0,
+          total_forwarded: n.total_forwarded || n.total_debit || 0,
           max_anomaly_score: n.max_anomaly_score,
           in_degree: n.in_degree,
           out_degree: n.out_degree,
           risk_score: n.risk_score || 0,
-          risk_tier: n.risk_tier || "LOW",
-          bank_name: n.bank_name || "",
+          risk_tier: n.risk_tier || getRiskTier(n.risk_score || 0),
+          bank_name: n.bank_name || n.bank || "",
           // Compatibility keys for previous styling/inspector
-          bank: n.bank_name || "",
-          is_seed: n.is_known_account,
+          bank: n.bank_name || n.bank || "",
+          is_seed: n.is_known_account || n.is_seed || false,
           is_internal: n.role !== "source" && n.role !== "destination",
         }
       });
@@ -418,6 +461,7 @@ export default function ReportView({
           source: String(e.source),
           target: String(e.target),
           amount: Number(e.amount || 0),
+          amountLabel: formatCurrencyShort(Number(e.amount || 0)),
           mode: e.mode || "",
           transaction_id: e.transaction_id || "",
           narration: e.narration || "",
@@ -435,132 +479,347 @@ export default function ReportView({
     return elements;
   }, [graphData, minAmount, minAnomalyScore, searchQuery, selectedRiskTiers, selectedModes, flaggedOnly, isOverviewMode, selectedAccountId, targetDateStr, dayOffset]);
 
-  // Re-run layout if layout name changes
-  useEffect(() => {
-    if (cyInstance.current && filteredElements.length > 0) {
-      const layout = cyInstance.current.layout({
-        name: layoutName,
-        animate: true,
-        fit: true,
-        padding: 30,
+  // Helper to construct layout settings with expanded spacing for clearer labels
+  const getLayoutOptions = (name: string) => {
+    const baseOptions = {
+      name,
+      animate: true,
+      animationDuration: 500,
+      fit: true,
+      padding: 50,
+    };
+
+    if (name === "cose") {
+      return {
+        ...baseOptions,
+        idealEdgeLength: () => 140, // Increased node-to-node distance so edge label text has more space
+        nodeRepulsion: () => 9000,   // Increased repulsion to spread out nodes further
+        edgeElasticity: () => 100,
+        nestingFactor: 1.2,
+        gravity: 5,                  // Lower gravity allows graph to stretch and expand
+        numIter: 1000,
+        initialTemp: 1000,
+        coolingFactor: 0.99,
+        minTemp: 1.0,
+      };
+    }
+
+    if (name === "concentric") {
+      return {
+        ...baseOptions,
         concentric: (node: any) => {
           if (node.data("is_seed")) return 3;
           return node.data("risk_tier") === "CRITICAL" || node.data("risk_tier") === "HIGH" ? 2 : 1;
         },
         levelWidth: () => 1,
-      } as any);
-      layout.run();
+        minNodeSpacing: 100, // Explicitly separate concentric rings for readability
+      };
+    }
+
+    return baseOptions;
+  };
+
+  // Re-run layout if layout name changes
+  useEffect(() => {
+    if (cyInstance.current && filteredElements.length > 0) {
+      try {
+        if (!(cyInstance.current as any).destroyed()) {
+          const layout = cyInstance.current.layout(getLayoutOptions(layoutName) as any);
+          layout.run();
+        }
+      } catch (err) {
+        console.error("Cytoscape layout execution failed:", err);
+        setHasGraphError(true);
+      }
     }
   }, [layoutName, filteredElements]);
 
   // Initialize Cytoscape
+  const expandedNodesRef = useRef<Set<string>>(new Set());
+  const setExpandedNodes = (newSet: Set<string>) => {
+    expandedNodesRef.current = newSet;
+    setExpandedNodesState(newSet);
+  };
+
   useEffect(() => {
     if (!cyRef.current || filteredElements.length === 0) return;
 
     if (cyInstance.current) {
-      cyInstance.current.destroy();
+      if (isExpandingRef.current) {
+        // Skip recreation because we added elements progressively via cy.add()
+        isExpandingRef.current = false;
+        return;
+      }
+      try {
+        cyInstance.current.destroy();
+      } catch (e) {
+        console.warn("Failed to destroy Cytoscape instance:", e);
+      }
+      cyInstance.current = null;
     }
 
-    const cy = cytoscape({
-      container: cyRef.current,
-      elements: filteredElements,
+    let cy: cytoscape.Core;
+    try {
+      cy = cytoscape({
+        container: cyRef.current,
+        elements: filteredElements,
       style: [
         {
           selector: "node",
           style: {
-            "label": (node: any) => {
-              const lbl = node.data("label") || node.data("id");
-              return lbl.length > 15 ? lbl.substring(0, 13) + "..." : lbl;
+            "width": 70,
+            "height": 70,
+            "background-color": (ele: any) => {
+              const tier = String(ele.data("risk_tier") || "").toUpperCase(); // CRITICAL | HIGH | MEDIUM | LOW
+              return RISK_TIER_COLORS[tier as keyof typeof RISK_TIER_COLORS] || DEFAULT_NODE_COLOR;
             },
-            "width": (node: any) => (node.data("is_seed") ? 42 : 30),
-            "height": (node: any) => (node.data("is_seed") ? 42 : 30),
-            "background-color": (node: any) => {
-              const tier = String(node.data("risk_tier")).toUpperCase();
-              if (tier === "CRITICAL") return "#f43f5e"; // Rose red
-              if (tier === "HIGH") return "#f97316"; // Orange
-              if (tier === "MEDIUM") return "#eab308"; // Yellow
-              return "#10b981"; // Emerald green
-            },
-            "color": "#f8fafc",
-            "font-size": "9px",
-            "font-family": "Inter, system-ui, sans-serif",
+            "border-width": 4,
+            "border-style": "dashed",
+            "border-color": NODE_BORDER_COLOR,
+            "label": "data(id)",
             "text-valign": "bottom",
-            "text-margin-y": 5,
-            "border-width": (node: any) => (node.data("is_seed") ? 3 : 1.5),
-            "border-color": "#ffffff",
-            "border-opacity": 0.8,
-            "overlay-padding": "4px",
-            "overlay-opacity": 0,
-          },
+            "text-margin-y": 12,
+            "font-size": 15,
+            "font-weight": "bold",
+            "color": "#f1f5f9",
+          } as any,
         },
         {
           selector: "node:selected",
           style: {
-            "border-width": 4,
-            "border-color": "#6366f1",
-            "border-opacity": 1,
+            "overlay-color": "#6366f1",
+            "overlay-opacity": 0.3,
+            "overlay-padding": "6px",
           },
         },
         {
           selector: "edge",
           style: {
-            "width": (edge: any) => Math.min(Math.max(Math.log10(edge.data("amount") || 1) * 1.5, 1.5), 6),
-            "line-color": (edge: any) => (edge.data("is_flagged") === 1 || edge.data("risk_flag") === "SUSPICIOUS" ? "#f43f5e" : "#475569"),
-            "target-arrow-color": (edge: any) => (edge.data("is_flagged") === 1 || edge.data("risk_flag") === "SUSPICIOUS" ? "#f43f5e" : "#475569"),
-            "target-arrow-shape": "triangle",
             "curve-style": "bezier",
-            "label": (edge: any) => {
-              const amt = edge.data("amount");
-              if (amt >= 10000000) return `₹${(amt / 10000000).toFixed(1)}Cr`;
-              if (amt >= 100000) return `₹${(amt / 100000).toFixed(1)}L`;
-              if (amt >= 1000) return `₹${(amt / 1000).toFixed(0)}k`;
-              return `₹${amt}`;
-            },
-            "font-size": "8px",
+            "width": 4,
+            "line-color": (ele: any) => (ele.data("is_flagged") || ele.data("risk_flag") === "SUSPICIOUS") ? EDGE_COLORS.FLAGGED : EDGE_COLORS.NORMAL,
+            "target-arrow-color": (ele: any) => (ele.data("is_flagged") || ele.data("risk_flag") === "SUSPICIOUS") ? EDGE_COLORS.FLAGGED : EDGE_COLORS.NORMAL,
+            "target-arrow-shape": "triangle",
+            "arrow-scale": 1.4,
+            "label": "data(amountLabel)",      // e.g. "₹4.80L"
+            "font-size": 13,
             "font-weight": "bold",
-            "color": "#94a3b8",
-            "text-background-opacity": 0.9,
+            "color": "#fff",
             "text-background-color": "#0f172a",
-            "text-background-padding": "2px",
+            "text-background-opacity": 1,
+            "text-background-padding": "5px",
             "text-background-shape": "roundrectangle",
             "text-rotation": "autorotate",
-            "arrow-scale": 0.85,
-          },
+            "edge-distances": "node-position",
+            "control-point-step-size": 40,
+          } as any,
         },
       ],
-      layout: {
-        name: layoutName,
-        padding: 40,
-        animate: true,
-        animationDuration: 500,
-      } as any,
+      layout: getLayoutOptions(layoutName) as any,
     });
-
     cyInstance.current = cy;
+    setHasGraphError(false);
+    } catch (err) {
+      console.error("Cytoscape initialization failed:", err);
+      setHasGraphError(true);
+      return;
+    }
 
-    cy.on("tap", "node", (evt) => {
-      const data = evt.target.data();
-      handleHighlightNode(data.id);
-      if (data && data.id) {
+    try {
+      cy.on("tap", "node", async (evt) => {
+      const node = evt.target;
+      const data = node.data();
+      const nodeId = data.id;
+
+      handleHighlightNode(nodeId);
+      setSelectedNodeData(data);
+
+      if (data && nodeId) {
         if (isOverviewMode) {
           setIsOverviewMode(false);
-          setSelectedAccountId(data.id);
-        } else if (data.id !== selectedAccountId) {
-          setSelectedAccountId(data.id);
+          setSelectedAccountId(nodeId);
+        } else if (nodeId !== selectedAccountId) {
+          setSelectedAccountId(nodeId);
+        }
+
+        // --- Click-to-Expand Interaction ---
+        // Guard 1: check if already expanded (using ref to avoid stale closure)
+        if (expandedNodesRef.current.has(nodeId)) {
+          return;
+        }
+
+        // Guard 2: check if canvas limit reached (cap total nodes at 40)
+        const currentNodesCount = cy.nodes().length;
+        if (currentNodesCount >= 40) {
+          setToastMessage("Graph limit reached — open a focused trace instead");
+          return;
+        }
+
+        try {
+          // Fetch fund trace (1-hop)
+          const traceData = await getFundTrace(nodeId, 1);
+
+          if (!traceData || !traceData.nodes) {
+            return;
+          }
+
+          // Deduplicate nodes before adding
+          const existingNodeIds = new Set(cy.nodes().map((n: any) => n.id()));
+          const newNodes = traceData.nodes.filter((n: any) => !existingNodeIds.has(String(n.id)));
+
+          // Check growth cap again with the new incoming nodes
+          if (currentNodesCount + newNodes.length > 40) {
+            setToastMessage("Graph limit reached — open a focused trace instead");
+            return;
+          }
+
+          // Deduplicate edges
+          const existingEdgeIds = new Set(cy.edges().map((e: any) => e.id()));
+          const newEdges = traceData.edges.filter((e: any) => {
+            const edgeId = String(e.id || e.transaction_id || e.debit_txn_id || "");
+            return edgeId && !existingEdgeIds.has(edgeId);
+          });
+
+          // If no new nodes or edges, just mark as expanded and return
+          if (newNodes.length === 0 && newEdges.length === 0) {
+            setExpandedNodes(new Set([...expandedNodesRef.current, nodeId]));
+            return;
+          }
+
+          // Format elements for Cytoscape cy.add
+          const elementsToAdd: any[] = [];
+
+          newNodes.forEach((n: any) => {
+            elementsToAdd.push({
+              group: "nodes",
+              data: {
+                id: String(n.id),
+                label: n.label || n.id,
+                account_holder: n.account_holder || n.label || "",
+                is_known_account: n.is_known_account || n.is_seed || false,
+                role: n.role || n.fraud_role || "",
+                total_transactions: n.total_transactions || n.txn_count || 0,
+                total_received: n.total_received || n.total_credit || 0,
+                total_forwarded: n.total_forwarded || n.total_debit || 0,
+                max_anomaly_score: n.max_anomaly_score,
+                in_degree: n.in_degree,
+                out_degree: n.out_degree,
+                risk_score: n.risk_score || 0,
+                risk_tier: n.risk_tier || getRiskTier(n.risk_score || 0),
+                bank_name: n.bank_name || n.bank || "",
+                bank: n.bank_name || n.bank || "",
+                is_seed: n.is_known_account || n.is_seed || false,
+                is_internal: n.role !== "source" && n.role !== "destination",
+              }
+            });
+          });
+
+          newEdges.forEach((e: any) => {
+            const edgeId = String(e.id || e.transaction_id || e.debit_txn_id || `edge_${Date.now()}_${Math.random()}`);
+            elementsToAdd.push({
+              group: "edges",
+              data: {
+                id: edgeId,
+                source: String(e.source),
+                target: String(e.target),
+                amount: Number(e.amount || 0),
+                amountLabel: formatCurrencyShort(Number(e.amount || 0)),
+                mode: e.mode || e.channel || "",
+                transaction_id: e.transaction_id || e.id || "",
+                narration: e.narration || "",
+                datetime: e.datetime || e.date || "",
+                direction: e.direction || "",
+                is_flagged: e.is_flagged !== undefined ? Number(e.is_flagged) : (e.is_fraud_flagged ? 1 : 0),
+                anomaly_score: e.anomaly_score,
+                dates: [e.datetime ? e.datetime.split(" ")[0] : (e.date ? e.date.split(" ")[0] : "")],
+                risk_flag: (e.is_flagged === 1 || e.is_fraud_flagged) ? "SUSPICIOUS" : "NORMAL",
+              }
+            });
+          });
+
+          // Signal to the useEffect not to destroy the graph
+          isExpandingRef.current = true;
+
+          // Add to cytoscape instance directly
+          cy.add(elementsToAdd);
+
+          // Mark this node as expanded
+          setExpandedNodes(new Set([...expandedNodesRef.current, nodeId]));
+
+          // Update the React state graphData so it's in sync
+          setGraphData(prev => {
+            if (!prev) return prev;
+
+            const updatedNodes = [...prev.nodes];
+            const updatedEdges = [...prev.edges];
+
+            newNodes.forEach((n: any) => {
+              if (!updatedNodes.some(x => String((x as any).id) === String(n.id))) {
+                updatedNodes.push({
+                  id: String(n.id),
+                  label: n.label || n.id,
+                  account_holder: n.account_holder || n.label || "",
+                  is_known_account: n.is_known_account || n.is_seed || false,
+                  role: n.role || n.fraud_role || "",
+                  total_transactions: n.total_transactions || n.txn_count || 0,
+                  total_received: n.total_received || n.total_credit || 0,
+                  total_forwarded: n.total_forwarded || n.total_debit || 0,
+                  max_anomaly_score: n.max_anomaly_score,
+                  in_degree: n.in_degree,
+                  out_degree: n.out_degree,
+                  risk_score: n.risk_score || 0,
+                  risk_tier: n.risk_tier || getRiskTier(n.risk_score || 0),
+                  bank_name: n.bank_name || n.bank || "",
+                } as any);
+              }
+            });
+
+            newEdges.forEach((e: any) => {
+              const edgeId = String(e.id || e.transaction_id || e.debit_txn_id || "");
+              if (!updatedEdges.some(x => String((x as any).id) === edgeId)) {
+                updatedEdges.push({
+                  id: edgeId,
+                  source: String(e.source),
+                  target: String(e.target),
+                  amount: Number(e.amount || 0),
+                  mode: e.mode || e.channel || "",
+                  transaction_id: e.transaction_id || e.id || "",
+                  narration: e.narration || "",
+                  datetime: e.datetime || e.date || "",
+                  direction: e.direction || "",
+                  is_flagged: e.is_flagged !== undefined ? Number(e.is_flagged) : (e.is_fraud_flagged ? 1 : 0),
+                  anomaly_score: e.anomaly_score,
+                } as any);
+              }
+            });
+
+            return { nodes: updatedNodes, edges: updatedEdges } as any;
+          });
+
+          // Re-run the layout after merging
+          cy.layout(getLayoutOptions(layoutName) as any).run();
+
+        } catch (err) {
+          console.error("Failed to expand node:", err);
+          setToastMessage("Failed to expand node: trace endpoint error");
         }
       }
     });
 
-    cy.on("tap", (evt) => {
-      if (evt.target === cy) {
-        setSelectedNodeData(null);
-      }
-    });
+      cy.on("tap", (evt) => {
+        if (evt.target === cy) {
+          setSelectedNodeData(null);
+        }
+      });
 
-    const seedNode = cy.nodes("[?is_seed]");
-    if (seedNode.length > 0) {
-      seedNode.select();
-      setSelectedNodeData(seedNode.data());
+      const seedNode = cy.nodes("[?is_seed]");
+      if (seedNode.length > 0) {
+        seedNode.select();
+        setSelectedNodeData(seedNode.data());
+      }
+    } catch (err) {
+      console.error("Cytoscape setup failed:", err);
+      setHasGraphError(true);
     }
 
     return () => {
@@ -1007,7 +1266,39 @@ export default function ReportView({
                     />
 
                     {/* Cytoscape element container */}
-                    <div ref={cyRef} className="absolute inset-0 w-full h-full" />
+                    {hasGraphError ? (
+                      <div className="absolute inset-0 w-full h-full bg-slate-950 flex flex-col items-center justify-center gap-2 p-6 z-20">
+                        <span className="text-3xl">⚠️</span>
+                        <p className="text-sm font-semibold text-slate-300">statement not available</p>
+                        <p className="text-xs text-slate-500 text-center max-w-xs">
+                          An error occurred while loading the visual trace network.
+                        </p>
+                        <button
+                          onClick={() => {
+                            setHasGraphError(false);
+                            isExpandingRef.current = false;
+                            if (cyInstance.current) {
+                              try {
+                                cyInstance.current.destroy();
+                              } catch {}
+                              cyInstance.current = null;
+                            }
+                          }}
+                          className="mt-2 rounded-md bg-slate-800 border border-slate-700 hover:bg-slate-700 px-3 py-1.5 text-xs text-slate-300 font-medium transition-colors cursor-pointer"
+                        >
+                          Retry Render
+                        </button>
+                      </div>
+                    ) : (
+                      <div ref={cyRef} className="absolute inset-0 w-full h-full" />
+                    )}
+
+                    {toastMessage && (
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-900 border border-red-500/30 text-red-400 text-xs font-semibold px-4 py-2.5 rounded-lg shadow-lg z-30 transition-all duration-300 animate-bounce flex items-center gap-2">
+                        <span>⚠️</span>
+                        <span>{toastMessage}</span>
+                      </div>
+                    )}
 
                     {graphLoading && (
                       <div className="absolute inset-0 bg-slate-950/80 z-20 flex flex-col items-center justify-center gap-3">
@@ -1017,30 +1308,36 @@ export default function ReportView({
                     )}
 
                     {/* Legend Overlay */}
-                    <div className="absolute bottom-3 left-3 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-lg p-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-slate-400 z-10 pointer-events-none">
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-blue-500 border border-white inline-block" />
-                        <span className="font-semibold text-slate-300">Seed Node</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-rose-500 inline-block" />
+                    <div className="absolute bottom-3 left-3 bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-lg px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400 z-10 pointer-events-none">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[12px] leading-none" style={{ color: RISK_TIER_COLORS.CRITICAL }}>●</span>
                         <span>Critical</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-orange-500 inline-block" />
+                      <div className="flex items-center gap-1">
+                        <span className="text-[12px] leading-none" style={{ color: RISK_TIER_COLORS.HIGH }}>●</span>
                         <span>High</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-yellow-500 inline-block" />
+                      <div className="flex items-center gap-1">
+                        <span className="text-[12px] leading-none" style={{ color: RISK_TIER_COLORS.MEDIUM }}>●</span>
                         <span>Medium</span>
                       </div>
-                      <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                        <span className="h-[2px] w-4 bg-slate-500 inline-block" />
-                        <span>Normal Flow</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[12px] leading-none" style={{ color: RISK_TIER_COLORS.LOW }}>●</span>
+                        <span>Low</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-[2px] w-4 bg-rose-500 inline-block" />
-                        <span className="text-rose-400 font-semibold">Flagged Flow</span>
+                      <span className="text-slate-800">|</span>
+                      <div className="flex items-center gap-1">
+                        <span className="font-bold text-[12px] leading-none" style={{ color: EDGE_COLORS.NORMAL }}>—</span>
+                        <span>Normal</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="font-bold text-[12px] leading-none" style={{ color: EDGE_COLORS.FLAGGED }}>—</span>
+                        <span>Flagged</span>
+                      </div>
+                      <span className="text-slate-800">|</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[14px] leading-none font-bold" style={{ color: NODE_BORDER_COLOR }}>⟳</span>
+                        <span>Expandable</span>
                       </div>
                     </div>
                   </main>
