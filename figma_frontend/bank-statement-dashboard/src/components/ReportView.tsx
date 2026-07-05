@@ -883,6 +883,409 @@ export default function ReportView({
     }
   };
 
+  const exportPDF = () => {
+    if (!analytics) return;
+
+    // Create a new window for printing
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Please allow popups to export the PDF report.");
+      return;
+    }
+
+    const dateStr = new Date().toLocaleString("en-IN", {
+      dateStyle: "long",
+      timeStyle: "medium",
+    });
+    const filesList = files && files.length > 0 
+      ? files.map(f => f.name).join(", ") 
+      : "Uploaded Bank Statements";
+    
+    // Construct pattern rows
+    const patterns = [
+      { label: "Round Trips", value: analytics.round_trips ?? 0 },
+      { label: "Layering Chains", value: analytics.layering_chains ?? 0 },
+      { label: "Fan-In Links", value: analytics.fan_in ?? 0 },
+      { label: "Fan-Out Links", value: analytics.fan_out ?? 0 },
+      { label: "Smurfing Patterns", value: analytics.smurfing ?? 0 },
+      { label: "Odd Hours Txns", value: analytics.odd_hours ?? 0 },
+    ];
+
+    // Construct account rows
+    const topAccountsHtml = (analytics.top_accounts || []).map(acc => `
+      <tr class="border-b border-slate-100 hover:bg-slate-50/50">
+        <td class="px-4 py-3 font-mono text-xs text-slate-700 font-bold">${acc.account_id}</td>
+        <td class="px-4 py-3 text-slate-700 font-medium">${acc.account_holder}</td>
+        <td class="px-4 py-3 text-right font-bold text-slate-900">${Number(acc.risk_score).toFixed(1)}%</td>
+        <td class="px-4 py-3">
+          <span class="badge badge-${acc.risk_tier.toLowerCase()}">${acc.risk_tier}</span>
+        </td>
+        <td class="px-4 py-3 text-slate-600 text-xs">${acc.active_patterns}</td>
+      </tr>
+    `).join("");
+
+    const criticalCount = analytics.critical_accounts ?? 0;
+    const highCount = analytics.high_accounts ?? 0;
+    const mediumCount = analytics.medium_accounts ?? 0;
+    const totalCount = analytics.accounts ?? 0;
+    const lowCount = totalCount - (criticalCount + highCount + mediumCount);
+    const resolvedLowCount = lowCount > 0 ? lowCount : 0;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>AML Investigation Report - ${dateStr}</title>
+        <meta charset="utf-8">
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+          
+          body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: #1e293b;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 40px;
+            font-size: 13px;
+            line-height: 1.5;
+          }
+          
+          .header-container {
+            background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+            color: #ffffff;
+            padding: 30px 40px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(30, 58, 138, 0.1);
+          }
+          
+          .header-container::after {
+            content: '';
+            position: absolute;
+            top: -50px;
+            right: -50px;
+            width: 250px;
+            height: 250px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, transparent 70%);
+            border-radius: 50%;
+          }
+
+          .logo-text {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: #93c5fd;
+            margin-bottom: 6px;
+          }
+
+          .report-title {
+            font-size: 24px;
+            font-weight: 800;
+            margin: 0 0 12px 0;
+            letter-spacing: -0.02em;
+          }
+
+          .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            padding-top: 16px;
+            margin-top: 16px;
+          }
+
+          .meta-item {
+            font-size: 12px;
+          }
+
+          .meta-label {
+            color: #bfdbfe;
+            font-weight: 500;
+            margin-bottom: 2px;
+          }
+
+          .meta-value {
+            color: #ffffff;
+            font-weight: 600;
+          }
+
+          .section-title {
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #2563eb;
+            margin: 30px 0 15px 0;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 6px;
+            page-break-after: avoid;
+          }
+
+          .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 25px;
+          }
+
+          .stat-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px;
+            background-color: #f8fafc;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.01);
+          }
+
+          .stat-card-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+          }
+
+          .stat-card-value {
+            font-size: 22px;
+            font-weight: 800;
+            margin-top: 4px;
+          }
+
+          .accent-red { color: #dc2626; border-left: 4px solid #ef4444; }
+          .accent-orange { color: #ea580c; border-left: 4px solid #f97316; }
+          .accent-yellow { color: #ca8a04; border-left: 4px solid #eab308; }
+          .accent-blue { color: #2563eb; border-left: 4px solid #3b82f6; }
+
+          .pattern-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 25px;
+          }
+
+          .pattern-card {
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+
+          .pattern-label {
+            font-size: 11px;
+            color: #475569;
+            font-weight: 600;
+          }
+
+          .pattern-value {
+            font-size: 14px;
+            font-weight: 800;
+            color: #1e293b;
+            background-color: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 6px;
+          }
+
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+          }
+
+          th {
+            background-color: #f8fafc;
+            color: #475569;
+            font-weight: 700;
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 2px solid #e2e8f0;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.05em;
+          }
+
+          td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e2e8f0;
+          }
+
+          tr {
+            page-break-inside: avoid;
+          }
+
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 9999px;
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+
+          .badge-critical { background-color: #fee2e2; color: #991b1b; }
+          .badge-high { background-color: #ffedd5; color: #9a3412; }
+          .badge-medium { background-color: #fef9c3; color: #854d0e; }
+          .badge-low { background-color: #dcfce7; color: #166534; }
+
+          @media print {
+            body {
+              padding: 0;
+              margin: 0;
+            }
+            .no-print {
+              display: none;
+            }
+            .header-container {
+              border-radius: 0;
+              box-shadow: none;
+              background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%) !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .stat-card {
+              background-color: #f8fafc !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .badge-critical { background-color: #fee2e2 !important; color: #991b1b !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .badge-high { background-color: #ffedd5 !important; color: #9a3412 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .badge-medium { background-color: #fef9c3 !important; color: #854d0e !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .badge-low { background-color: #dcfce7 !important; color: #166534 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            th {
+              background-color: #f8fafc !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          }
+          
+          .btn-container {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: flex-end;
+          }
+          
+          .print-btn {
+            background-color: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+            transition: all 0.2s ease;
+          }
+          
+          .print-btn:hover {
+            background-color: #1d4ed8;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="btn-container no-print">
+          <button class="print-btn" onclick="window.print()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
+            </svg>
+            Save PDF Report
+          </button>
+        </div>
+
+        <div class="header-container">
+          <div class="logo-text">CIDECODE forensic audit</div>
+          <h1 class="report-title">Financial Intelligence Investigation Report</h1>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <div class="meta-label">Analyzed Data Sources</div>
+              <div class="meta-value">${filesList}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Audit Timestamp</div>
+              <div class="meta-value">${dateStr}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-title">Forensic Summary</div>
+        <p style="margin-bottom: 20px; color: #475569; font-size: 13px; line-height: 1.6;">
+          An automated anti-money laundering (AML) audit and transaction reconstruction has been executed on the uploaded financial ledger data. 
+          A total of <strong>${totalCount}</strong> unique accounts were parsed, revealing a risk distribution profile of 
+          <strong>${criticalCount} Critical</strong> and <strong>${highCount} High</strong> tier risk targets. 
+          The audit scan flagged multiple transactional anomalies requiring immediate forensic examination and regulatory compliance evaluation.
+        </p>
+
+        <div class="stat-grid">
+          <div class="stat-card accent-red">
+            <div class="stat-card-label">Critical Risk</div>
+            <div class="stat-card-value">${criticalCount}</div>
+          </div>
+          <div class="stat-card accent-orange">
+            <div class="stat-card-label">High Risk</div>
+            <div class="stat-card-value">${highCount}</div>
+          </div>
+          <div class="stat-card accent-yellow">
+            <div class="stat-card-label">Medium Risk</div>
+            <div class="stat-card-value">${mediumCount}</div>
+          </div>
+          <div class="stat-card accent-blue">
+            <div class="stat-card-label">Total Accounts</div>
+            <div class="stat-card-value">${totalCount}</div>
+          </div>
+        </div>
+
+        <div class="section-title">Anomalous Activity Patterns</div>
+        <div class="pattern-grid">
+          ${patterns.map(p => `
+            <div class="pattern-card">
+              <span class="pattern-label">${p.label}</span>
+              <span class="pattern-value">${p.value}</span>
+            </div>
+          `).join("")}
+        </div>
+
+        <div class="section-title">Suspect Account Registries</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Account Identifier</th>
+              <th>Account Holder Name</th>
+              <th style="text-align: right;">Risk Score</th>
+              <th>Risk Tier</th>
+              <th>Triggered Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${topAccountsHtml || `<tr><td colspan="5" style="text-align: center; color: #94a3b8;">No high-risk accounts identified in this file structure.</td></tr>`}
+          </tbody>
+        </table>
+        
+        <div style="margin-top: 50px; border-top: 1px solid #e2e8f0; padding-top: 20px; font-size: 11px; color: #94a3b8; text-align: center; page-break-inside: avoid;">
+          CONFIDENTIAL FOR INTERNAL COMPLIANCE USE ONLY. THIS IS A COMPUTER GENERATED REPORT COMPILED BY CIDECODE FRAUD PREVENTION SERVICES.
+        </div>
+        
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          }
+        </script>
+      </body>
+      </html>
+    `);
+    
+    printWindow.document.close();
+  };
+
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -924,9 +1327,27 @@ export default function ReportView({
           <div className="w-full space-y-6">
             {activeSubView === "reports" && (
               <>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                  Risk Overview
-                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Risk Overview
+                  </p>
+                  <button
+                    onClick={exportPDF}
+                    className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg shadow-md hover:shadow-indigo-500/20 active:shadow-none transition-all cursor-pointer"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      fill="currentColor"
+                      viewBox="0 0 16 16"
+                    >
+                      <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                      <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                    </svg>
+                    Export Forensic PDF
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <StatCard label="CRITICAL" value={analytics.critical_accounts ?? 0} accent="red" />
                   <StatCard label="HIGH" value={analytics.high_accounts ?? 0} accent="orange" />
@@ -1101,20 +1522,8 @@ export default function ReportView({
                       </div>
                     )}
 
-                    {/* Search */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Search Account</label>
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search ID, Name, Bank..."
-                        className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
                     {/* Min Amount */}
-                    <div>
+                    <div className="mb-4">
                       <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Min Amount (₹)</label>
                       <input
                         type="number"
@@ -1134,89 +1543,6 @@ export default function ReportView({
                       <div className="flex justify-between text-[9px] text-slate-500 mt-1">
                         <span>₹0</span>
                         <span>₹25,000</span>
-                      </div>
-                    </div>
-
-                    {/* Date Filter Slider */}
-                    {(() => {
-                      const allDates = Array.from(new Set(graphData?.edges?.flatMap(e => {
-                        const base = e?.data || e;
-                        return base?.dates || ((base as any)?.datetime ? [(base as any).datetime.split(" ")[0]] : []);
-                      }) || [])).sort();
-                      if (allDates.length <= 1) return null;
-                      return (
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-xs font-medium text-slate-700">Filter Transactions From Date</span>
-                            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                              {allDates[minDateIndex] || "All Dates"}
-                            </span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max={allDates.length - 1}
-                            step="1"
-                            value={minDateIndex}
-                            onChange={(e) => setMinDateIndex(Number(e.target.value))}
-                            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                          />
-                        </div>
-                      );
-                    })()}
-
-
-                    {/* Risk Tier */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Risk Level</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {["CRITICAL", "HIGH", "MEDIUM", "LOW"].map((tier) => {
-                          const isSelected = selectedRiskTiers.includes(tier);
-                          return (
-                            <button
-                              key={tier}
-                              onClick={() =>
-                                setSelectedRiskTiers((prev) =>
-                                  prev.includes(tier) ? prev.filter((t) => t !== tier) : [...prev, tier]
-                                )
-                              }
-                              className={`rounded px-2 py-0.5 text-[9px] font-medium transition-all ${
-                                isSelected
-                                  ? "bg-indigo-600 text-white"
-                                  : "bg-slate-950 border border-slate-800 text-slate-400 hover:bg-slate-900"
-                              }`}
-                            >
-                              {tier}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Modes */}
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">Channels</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {["UPI", "NEFT", "IMPS", "RTGS"].map((mode) => {
-                          const isSelected = selectedModes.includes(mode);
-                          return (
-                            <button
-                              key={mode}
-                              onClick={() =>
-                                setSelectedModes((prev) =>
-                                  prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
-                                )
-                              }
-                              className={`rounded px-2 py-0.5 text-[9px] font-medium transition-all ${
-                                isSelected
-                                  ? "bg-blue-600 text-white"
-                                  : "bg-slate-950 border border-slate-800 text-slate-400 hover:bg-slate-900"
-                              }`}
-                            >
-                              {mode}
-                            </button>
-                          );
-                        })}
                       </div>
                     </div>
 

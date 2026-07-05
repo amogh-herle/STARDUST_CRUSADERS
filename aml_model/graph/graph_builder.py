@@ -49,6 +49,22 @@ class GraphBuilder:
         self._account_holder_map = self._build_holder_map(self.raw_df)
         # Full per-account dashboard stats, computed once and cached
         self._account_summary_cache: dict = {}
+        
+        # Load risk scores map from the same directory if risk_scores.csv exists
+        import os
+        dir_name = os.path.dirname(csv_path)
+        risk_csv = os.path.join(dir_name, "risk_scores.csv")
+        self._risk_scores_map = {}
+        if os.path.exists(risk_csv):
+            try:
+                risk_df = pd.read_csv(risk_csv, dtype=str)
+                for _, row in risk_df.iterrows():
+                    self._risk_scores_map[str(row["account_id"]).strip()] = {
+                        "risk_score": float(row.get("risk_score", 0.0)),
+                        "risk_tier": str(row.get("risk_tier", "LOW")).upper()
+                    }
+            except Exception as e:
+                print(f"[GraphBuilder] Failed to load risk_scores.csv: {e}")
 
     def _build_holder_map(self, df: pd.DataFrame) -> dict:
         holder_col = df[["account_id", "account_holder"]].dropna(subset=["account_holder"])
@@ -83,10 +99,21 @@ class GraphBuilder:
         df["counterparty_account"] = df.get(cp_col) if cp_col else None
         df["amount"] = df[["debit", "credit"]].max(axis=1)
 
+        # Check Phase 8 flag columns to set is_flagged
+        flag_cols = [
+            "is_round_trip", "is_round_trip_cycle", "is_layering", 
+            "is_fan_in", "is_fan_out", "is_smurfing", "is_odd_hour"
+        ]
+        combined_flag = pd.Series(0, index=df.index)
+        for col in flag_cols:
+            if col in df.columns:
+                col_flag = df[col].astype(str).str.lower().isin(["true", "1", "yes"])
+                combined_flag = combined_flag | col_flag.astype(int)
+
         if "is_flagged" in df.columns:
-            df["is_flagged"] = pd.to_numeric(df["is_flagged"], errors="coerce").fillna(0).astype(int)
+            df["is_flagged"] = pd.to_numeric(df["is_flagged"], errors="coerce").fillna(0).astype(int) | combined_flag
         else:
-            df["is_flagged"] = 0  # unscored CSV — every account treated as unflagged by default
+            df["is_flagged"] = combined_flag
 
         if "anomaly_score" in df.columns:
             df["anomaly_score"] = pd.to_numeric(df["anomaly_score"], errors="coerce").fillna(0)
@@ -268,11 +295,13 @@ class GraphBuilder:
             return {"nodes": [], "edges": [],
                     "meta": {"error": f"None of the seed account(s) {seeds} found in filtered data"}}
 
+        max_nodes = max(max_nodes, len(valid_seeds) * 10)
+
         visited = set(valid_seeds)
         frontier = list(valid_seeds)
         expanded_nodes = set()
 
-        for _ in range(max_hops):
+        for hop in range(max_hops):
             next_frontier = []
             for node in frontier:
                 txn_count = self.account_txn_counts.get(node, 0)
@@ -289,10 +318,10 @@ class GraphBuilder:
                         visited.add(neighbor)
                         next_frontier.append(neighbor)
 
-                if len(visited) >= max_nodes:
+                if len(visited) >= max_nodes and node not in valid_seeds:
                     break
             frontier = next_frontier
-            if len(visited) >= max_nodes or not frontier:
+            if len(visited) >= max_nodes and hop > 0:
                 break
 
         subgraph = full_graph.subgraph(visited).copy()
@@ -444,6 +473,33 @@ class GraphBuilder:
             holder_name = self._account_holder_map.get(n)
             is_known = n in known_accounts
 
+            n_str = str(n).strip()
+            if n_str in self._risk_scores_map:
+                risk_score = self._risk_scores_map[n_str]["risk_score"]
+                risk_tier = self._risk_scores_map[n_str]["risk_tier"]
+            else:
+                acct_rows = self.raw_df[self.raw_df["account_id"] == n]
+                if acct_rows.empty:
+                    acct_rows = self.raw_df[self.raw_df["counterparty_account"] == n]
+                
+                risk_score = 0.0
+                risk_tier = "LOW"
+                if not acct_rows.empty:
+                    max_score = float(acct_rows["anomaly_score"].max())
+                    risk_score = round(max_score * 100, 2)
+                    flagged_count = int(acct_rows["is_flagged"].sum())
+                    total_rows = len(acct_rows)
+                    flag_ratio = flagged_count / total_rows if total_rows > 0 else 0
+                    
+                    if flag_ratio >= 0.8 or risk_score >= 75:
+                        risk_tier = "CRITICAL"
+                    elif flag_ratio >= 0.5 or risk_score >= 50:
+                        risk_tier = "HIGH"
+                    elif flag_ratio >= 0.3 or risk_score >= 25:
+                        risk_tier = "MEDIUM"
+                    else:
+                        risk_tier = "LOW"
+
             nodes.append({
                 "id": n,
                 # Show the real holder's name on the node label when we have
@@ -461,6 +517,8 @@ class GraphBuilder:
                 "max_anomaly_score": round(max_risk, 4),
                 "in_degree": G.in_degree(n),
                 "out_degree": G.out_degree(n),
+                "risk_score": risk_score,
+                "risk_tier": risk_tier,
             })
 
         edges = []

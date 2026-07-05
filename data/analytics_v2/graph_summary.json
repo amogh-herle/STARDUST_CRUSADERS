@@ -1,21 +1,10 @@
 {
-<<<<<<< Updated upstream
-  "txn_graph_nodes": 54,
-  "txn_graph_edges": 274,
-  "account_graph_nodes": 54,
-  "account_graph_edges": 55,
-  "internal_account_nodes": 1,
-  "external_counterparty_nodes": 53,
-  "weakly_connected_comps": 1,
-  "density": 0.019217
-=======
-  "txn_graph_nodes": 12686,
-  "txn_graph_edges": 14406,
-  "account_graph_nodes": 12686,
-  "account_graph_edges": 12766,
-  "internal_account_nodes": 18,
-  "external_counterparty_nodes": 12668,
-  "weakly_connected_comps": 6,
-  "density": 7.9e-05
->>>>>>> Stashed changes
+  "txn_graph_nodes": 712,
+  "txn_graph_edges": 907,
+  "account_graph_nodes": 712,
+  "account_graph_edges": 723,
+  "internal_account_nodes": 7,
+  "external_counterparty_nodes": 705,
+  "weakly_connected_comps": 3,
+  "density": 0.001428
 }

@@ -135,7 +135,11 @@ async def upload_statements(
     rows_loaded, banks_detected = await _load_into_db(cleaned_path, analytics_out, db)
 
     # Automatically generate graph.json files from the newly uploaded transaction dataset
-    _generate_frontend_graph(cleaned_path)
+    analytics_csv = os.path.join(analytics_out, "analytics_transactions.csv")
+    if os.path.exists(analytics_csv):
+        _generate_frontend_graph(analytics_csv)
+    else:
+        _generate_frontend_graph(cleaned_path)
 
     return UploadResponse(
         upload_id=upload_id,

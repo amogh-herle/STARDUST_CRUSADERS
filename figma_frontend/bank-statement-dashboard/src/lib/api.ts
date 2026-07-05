@@ -137,7 +137,7 @@ export interface CytoscapeGraph {
  * Fetch the ledger money trail Cytoscape graph payload for an account.
  */
 export async function getLedgerTrace(accountId: string): Promise<CytoscapeGraph> {
-  const res = await fetch(`${BASE}/api/v1/graph/ledger-trace/${accountId}`);
+  const res = await fetch(`${BASE}/api/v1/graph/ledger-trace/${encodeURIComponent(accountId)}`);
   if (!res.ok) throw new Error(`Failed to fetch ledger trace for account ${accountId}`);
   return res.json();
 }
@@ -146,7 +146,7 @@ export async function getLedgerTrace(accountId: string): Promise<CytoscapeGraph>
  * Fetch the 1-hop ego-graph expansion for a given account.
  */
 export async function getFundTrace(accountId: string, hops: number = 1): Promise<any> {
-  const res = await fetch(`${BASE}/api/v1/graph/fund-trace/${accountId}?hops=${hops}`);
+  const res = await fetch(`${BASE}/api/v1/graph/fund-trace/${encodeURIComponent(accountId)}?hops=${hops}`);
   if (!res.ok) throw new Error(`Failed to fetch fund trace for account ${accountId}`);
   return res.json();
 }
@@ -198,7 +198,7 @@ export async function getAccountTransactions(
   pageSize: number = 100
 ): Promise<PaginatedTransactions> {
   const res = await fetch(
-    `${BASE}/api/v1/accounts/${accountId}/transactions?page=${page}&page_size=${pageSize}`
+    `${BASE}/api/v1/accounts/${encodeURIComponent(accountId)}/transactions?page=${page}&page_size=${pageSize}`
   );
   if (!res.ok) throw new Error(`Failed to fetch transactions for account ${accountId}`);
   return res.json();
