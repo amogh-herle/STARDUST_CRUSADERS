@@ -211,10 +211,7 @@ export default function Topbar({
   onClearActiveCase?: () => void;
 }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  // Removed showNewCase state - New Case button removed from topbar
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [cases, setCases] = useState<Case[]>([]);
-  const [loadingCases, setLoadingCases] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const supabase = createClient();
@@ -231,39 +228,11 @@ export default function Topbar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (showProfileMenu && user) {
-      loadCases();
-    }
-  }, [showProfileMenu, user]);
-
-  const loadCases = async () => {
-    if (!user) return;
-    setLoadingCases(true);
-    try {
-      const { data, error } = await supabase
-        .from("cases")
-        .select("*")
-        .eq("created_by", user.id)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      setCases(data || []);
-    } catch (err) {
-      console.error("Error loading cases:", err);
-    } finally {
-      setLoadingCases(false);
-    }
-  };
-
   const handleLogout = () => {
     logout();
     router.push("/login");
     router.refresh();
   };
-
-  // Removed handleCaseCreated - cases will be created from UploadZone now
 
   return (
     <>
@@ -305,7 +274,7 @@ export default function Topbar({
             </button>
 
             {showProfileMenu && (
-              <div className="absolute right-0 mt-2 w-80 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+              <div className="absolute right-0 mt-2 w-64 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
                 <div className="border-b border-gray-200 p-4">
                   <p className="text-sm font-semibold text-gray-900">
                     {user?.full_name || user?.username}
@@ -313,60 +282,7 @@ export default function Topbar({
                   <p className="text-xs text-gray-500 mt-0.5">@{user?.username}</p>
                 </div>
 
-                <div className="p-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    My Cases ({cases.length})
-                  </h3>
-
-                  {loadingCases ? (
-                    <p className="text-xs text-gray-400 text-center py-4">Loading...</p>
-                  ) : cases.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-4">
-                      No cases yet. Upload statements to create your first case.
-                    </p>
-                  ) : (
-                    <div className="max-h-64 overflow-y-auto space-y-2">
-                      {cases.map((c) => (
-                        <div
-                          key={c.id}
-                          className="rounded-md border border-gray-200 p-2.5 hover:bg-gray-50 cursor-pointer transition-colors"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-gray-900 truncate">
-                                {c.case_name}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-0.5">
-                                #{c.case_number}
-                              </p>
-                            </div>
-                            <span
-                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase ${
-                                PRIORITY_COLORS[c.priority] ?? "text-gray-600 bg-gray-50 border-gray-200"
-                              }`}
-                            >
-                              {c.priority}
-                            </span>
-                          </div>
-                          <div className="mt-1.5 flex items-center gap-2">
-                            <span
-                              className={`text-[10px] font-medium uppercase ${
-                                STATUS_COLORS[c.status] ?? "text-gray-600"
-                              }`}
-                            >
-                              {c.status.replace("_", " ")}
-                            </span>
-                            <span className="text-[10px] text-gray-400">
-                              {new Date(c.created_at).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-gray-200 p-2">
+                <div className="p-2">
                   <button
                     onClick={handleLogout}
                     className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
