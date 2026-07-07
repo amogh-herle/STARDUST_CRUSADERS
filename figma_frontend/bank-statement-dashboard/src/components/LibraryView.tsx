@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { listCases, deleteCase } from "@/lib/api";
 import { getSession } from "@/lib/auth";
 import { type Case } from "./Topbar";
 
@@ -28,7 +28,6 @@ export default function LibraryView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = createClient();
   const user = getSession();
 
   const loadLibrary = async () => {
@@ -36,14 +35,7 @@ export default function LibraryView({
     setLoading(true);
     setError(null);
     try {
-      const { data: casesData, error: casesError } = await supabase
-        .from("cases")
-        .select("*")
-        .eq("created_by", user.id)
-        .order("created_at", { ascending: false });
-
-      if (casesError) throw casesError;
-
+      const casesData = await listCases();
       setCases(casesData || []);
     } catch (err) {
       console.error("Error loading library:", err);
@@ -66,8 +58,7 @@ export default function LibraryView({
       return;
     }
     try {
-      const { error } = await supabase.from("cases").delete().eq("id", id);
-      if (error) throw error;
+      await deleteCase(id);
       loadLibrary();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete case");

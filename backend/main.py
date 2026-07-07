@@ -30,6 +30,7 @@ from routers.graph import router as graph_router
 from routers.investigations import router as investigations_router
 from routers.dashboard import dashboard_router, rings_router
 from routers.assistant import router as assistant_router
+from routers.auth import router as auth_router
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +74,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 PREFIX = "/api/v1"
 
+app.include_router(auth_router,            prefix=PREFIX)
 app.include_router(upload_router,         prefix=PREFIX)
 app.include_router(accounts_router,       prefix=PREFIX)
 app.include_router(transactions_router,   prefix=PREFIX)

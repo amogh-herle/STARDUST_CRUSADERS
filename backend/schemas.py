@@ -173,31 +173,69 @@ class GraphData(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Users
+# ---------------------------------------------------------------------------
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=4)
+    full_name: str = Field(..., min_length=1, max_length=100)
+
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: uuid.UUID
+    username: str
+    full_name: str
+    role: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
 # Investigations
 # ---------------------------------------------------------------------------
 class InvestigationCreate(BaseModel):
-    name: str = Field(..., min_length=3, max_length=200)
+    name: Optional[str] = None
+    case_name: Optional[str] = None
+    case_number: Optional[str] = None
     description: Optional[str] = None
     seed_account_id: Optional[str] = None
+    priority: Optional[str] = "medium"
+    status: Optional[str] = "open"
 
 
 class InvestigationUpdate(BaseModel):
     name: Optional[str] = None
+    case_name: Optional[str] = None
+    case_number: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    priority: Optional[str] = None
     case_narrative: Optional[str] = None
     linked_ring_ids: Optional[list[str]] = None
+    uploaded_files: Optional[list[str]] = None
+    upload_id: Optional[str] = None
 
 
 class InvestigationOut(BaseModel):
     id: uuid.UUID
     name: str
-    description: Optional[str]
-    seed_account_id: Optional[str]
+    case_name: Optional[str] = None
+    case_number: Optional[str] = None
+    description: Optional[str] = None
+    seed_account_id: Optional[str] = None
     status: str
-    created_by: str
-    linked_ring_ids: Optional[list]
-    case_narrative: Optional[str]
+    priority: str
+    created_by: Optional[uuid.UUID] = None
+    linked_ring_ids: Optional[list] = None
+    case_narrative: Optional[str] = None
+    uploaded_files: Optional[list[str]] = None
+    upload_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

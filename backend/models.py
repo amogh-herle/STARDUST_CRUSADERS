@@ -221,6 +221,20 @@ class FraudRingMember(Base):
 
 
 # ---------------------------------------------------------------------------
+# 0. Users
+# ---------------------------------------------------------------------------
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="investigator")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------------------
 # 5. Investigations
 # ---------------------------------------------------------------------------
 class Investigation(Base):
@@ -230,6 +244,8 @@ class Investigation(Base):
         Uuid, primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    case_name: Mapped[Optional[str]] = mapped_column(String(200))
+    case_number: Mapped[Optional[str]] = mapped_column(String(100), unique=True, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
 
     # Seed account the investigator started from
@@ -239,13 +255,18 @@ class Investigation(Base):
 
     # open | active | closed | escalated
     status: Mapped[str] = mapped_column(String(20), default="open")
-    created_by: Mapped[str] = mapped_column(String(100), default="investigator")
+    priority: Mapped[str] = mapped_column(String(50), default="medium")
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
 
     # Linked rings (stored as JSON array of ring_ids)
     linked_ring_ids: Mapped[Optional[list]] = mapped_column(JSON, default=list)
 
     # LLM-generated case narrative (Phase 11)
     case_narrative: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Saved files attached to this case
+    uploaded_files: Mapped[Optional[list[str]]] = mapped_column(JSON, default=list)
+    upload_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow

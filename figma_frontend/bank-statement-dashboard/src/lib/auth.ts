@@ -4,12 +4,9 @@
  * Session is stored in:
  *   - localStorage  → for client-side reads (Topbar, etc.)
  *   - cookie        → for server-side proxy route protection
- *
- * The Supabase client is used only as a DB client (rpc calls),
- * NOT for Supabase Auth.
  */
 
-import { createClient } from "@/lib/supabase/client";
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 export type AuthUser = {
   id: string;
@@ -54,61 +51,69 @@ export async function register(
   password: string,
   fullName?: string
 ): Promise<{ user: AuthUser } | { error: string }> {
-  const supabase = createClient();
+  try {
+    const res = await fetch(`${BASE}/api/v1/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: username.trim().toLowerCase(),
+        password: password,
+        full_name: fullName?.trim() || username.trim(),
+      }),
+    });
 
-  const { data, error } = await supabase.rpc("register_user", {
-    p_username: username.trim().toLowerCase(),
-    p_password: password,
-    p_full_name: fullName?.trim() || username.trim(),
-  });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Registration failed" }));
+      return { error: err.detail || "Registration failed" };
+    }
 
-  if (error) return { error: error.message };
+    const result = await res.json();
+    const user: AuthUser = {
+      id: result.id,
+      username: result.username,
+      full_name: result.full_name,
+      role: result.role || "investigator",
+    };
 
-  const result = data as { error?: string; id?: string; username?: string };
-  if (result.error) return { error: result.error };
-
-  const user: AuthUser = {
-    id: result.id!,
-    username: result.username!,
-    full_name: fullName?.trim() || username.trim(),
-    role: "investigator",
-  };
-
-  setSession(user);
-  return { user };
+    setSession(user);
+    return { user };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to register" };
+  }
 }
 
 export async function login(
   username: string,
   password: string
 ): Promise<{ user: AuthUser } | { error: string }> {
-  const supabase = createClient();
+  try {
+    const res = await fetch(`${BASE}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: username.trim().toLowerCase(),
+        password: password,
+      }),
+    });
 
-  const { data, error } = await supabase.rpc("login_user", {
-    p_username: username.trim().toLowerCase(),
-    p_password: password,
-  });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Incorrect username or password" }));
+      return { error: err.detail || "Incorrect username or password" };
+    }
 
-  if (error) return { error: error.message };
+    const result = await res.json();
+    const user: AuthUser = {
+      id: result.id,
+      username: result.username,
+      full_name: result.full_name,
+      role: result.role || "investigator",
+    };
 
-  const result = data as {
-    error?: string;
-    id?: string;
-    username?: string;
-    full_name?: string;
-    role?: string;
-  };
-  if (result.error) return { error: result.error };
-
-  const user: AuthUser = {
-    id: result.id!,
-    username: result.username!,
-    full_name: result.full_name || result.username!,
-    role: result.role || "investigator",
-  };
-
-  setSession(user);
-  return { user };
+    setSession(user);
+    return { user };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to login" };
+  }
 }
 
 export function logout() {

@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { getSession, logout, type AuthUser } from "@/lib/auth";
 import { View } from "./Sidebar";
+import { createCase } from "@/lib/api";
 
 const TITLES: Record<View, string> = {
   upload: "Upload bank statements",
@@ -59,7 +59,6 @@ export function NewCaseModal({
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">("medium");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const supabase = createClient();
 
   // Close on Escape
   useEffect(() => {
@@ -82,20 +81,13 @@ export function NewCaseModal({
       const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
       const caseNumber = `CASE-${today}-${suffix}`;
 
-      const { data, error: insertError } = await supabase
-        .from("cases")
-        .insert({
-          case_name: caseName.trim(),
-          case_number: caseNumber,
-          description: description.trim() || null,
-          priority,
-          status: "open",
-          created_by: userId,
-        })
-        .select()
-        .single();
-
-      if (insertError) throw insertError;
+      const data = await createCase({
+        case_name: caseName.trim(),
+        case_number: caseNumber,
+        description: description.trim() || null,
+        priority,
+        status: "open",
+      });
 
       onCreated(data as Case);
       onClose();
@@ -214,7 +206,6 @@ export default function Topbar({
   const [user, setUser] = useState<AuthUser | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-  const supabase = createClient();
 
   useEffect(() => {
     setUser(getSession());

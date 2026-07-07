@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: cidecode-db
+    environment:
+      POSTGRES_USER: cidecode
+      POSTGRES_PASSWORD: cidecode
+      POSTGRES_DB: cidecode
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cidecode"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cidecode-backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://cidecode:cidecode@db:5432/cidecode
+      - DATABASE_URL_SYNC=postgresql+psycopg2://cidecode:cidecode@db:5432/cidecode
+      - QWEN_BASE_URL=http://host.docker.internal:11434
+      - DEBUG=True
+      - CORS_ORIGINS=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - backend_uploads:/app/backend/uploads
+      - analytics_data:/app/data/analytics_v2
+
+  frontend:
+    build:
+      context: ./figma_frontend/bank-statement-dashboard
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_BASE=http://localhost:8000
+        - NEXT_PUBLIC_LOGO_PATH=/images.jpeg
+    container_name: cidecode-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000
+      - NEXT_PUBLIC_LOGO_PATH=/images.jpeg
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  analytics_data:

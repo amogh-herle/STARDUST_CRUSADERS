@@ -54,27 +54,27 @@ Raw Statements (PDF/CSV/Excel/Image)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Next.js Frontend                      │
-│   Upload → Reports → Graph View → Money Trail → Library  │
+│                    Next.js Frontend                     │
+│   Upload → Reports → Graph View → Money Trail → Library │
 └──────────────────────┬──────────────────────────────────┘
                        │ REST /api/v1/
 ┌──────────────────────▼──────────────────────────────────┐
-│                   FastAPI Backend                        │
-│   /upload  /accounts  /transactions  /graph              │
-│   /investigations  /dashboard  /rings  /assistant        │
+│                   FastAPI Backend                       │
+│   /upload  /accounts  /transactions  /graph             │
+│   /investigations  /dashboard  /rings  /assistant       │
 └────────────┬────────────────────────┬───────────────────┘
              │                        │
    ┌──────────▼─────────┐   ┌─────────▼──────────────────┐
    │   PostgreSQL DB    │   │   Phase 6/7/8 Pipeline     │
    │  (async SQLAlchemy)│   │  (subprocess calls on      │
-   │  Accounts          │   │   upload, writes analytics  │
+   │  Accounts          │   │   upload, writes analytics │
    │  Transactions      │   │   to data/analytics_v2/)   │
    │  FraudRings        │   └────────────────────────────┘
    │  Investigations    │
-   │  RiskScoreHistory  │   ┌────────────────────────────┐
-   └────────────────────┘   │   Qwen3-8B (via Ollama)    │
-                             │   Local LLM assistant       │
-                             └────────────────────────────┘
+   │  RiskScoreHistory  │    ┌───────────────────────────┐
+   └────────────────────┘    │   Qwen3-8B (via Ollama)   │
+                             │   Local LLM assistant     │
+                             └───────────────────────────┘
 ```
 
 ---
@@ -250,7 +250,7 @@ Built with **Next.js 16**, **TypeScript**, **Tailwind CSS 4**, and **Cytoscape.j
 | **Money Trail** | Deep-dive fund tracing for a specific account ID — traces inflows, outflows, and counterparty chains. Integrates the credit trail panel. |
 | **Library** | Saved investigation case files. Open a case to restore the full analysis context (uploaded files, graph state, reports). |
 
-**Auth:** Supabase SSR authentication.
+**Auth:** Local PostgreSQL/SQLite database-backed authentication.
 
 ---
 
@@ -264,67 +264,142 @@ Built with **Next.js 16**, **TypeScript**, **Tailwind CSS 4**, and **Cytoscape.j
 | ML / Analytics | scikit-learn (Isolation Forest), XGBoost, NetworkX, pandas, numpy, scipy |
 | LLM Assistant | Qwen3-8B via Ollama (tool-calling mode, local) |
 | Ingestion | pdfplumber, pypdf, openpyxl, Tesseract OCR (via pytesseract) |
-| Auth | Supabase |
+| Auth | Native Local PostgreSQL / SQLite |
 | Containerisation | Docker / Docker Compose |
 
 ---
 
 ## Getting Started
 
-### Prerequisites
-
-- Python 3.11+
-- Node.js 20+
-- PostgreSQL 15+
-- [Ollama](https://ollama.ai) (for the LLM assistant) — pull the model with `ollama pull qwen3:8b`
-- Tesseract OCR (for image-format bank statements)
-
-### Backend Setup
-
-```bash
-# 1. Clone and enter the project
-git clone https://github.com/your-org/STARDUST_CRUSADERS.git
-cd STARDUST_CRUSADERS
-
-# 2. Create a virtual environment
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS/Linux
-
-# 3. Install all dependencies
-pip install -r requirements.txt
-pip install -r aml_model/requirements.txt
-
-# 4. Configure the backend
-cp backend/.env.example backend/.env
-# Edit backend/.env — set DATABASE_URL and any overrides
-
-# 5. Start PostgreSQL and run the backend
-cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-The API will be live at `http://localhost:8000` and Swagger docs at `http://localhost:8000/docs`.
-
-### Frontend Setup
-
-```bash
-cd figma_frontend/bank-statement-dashboard
-
-# Install dependencies
-npm install
-
-# Configure environment
-cp .env.example .env.local
-# Edit .env.local — set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-# Start dev server
-npm run dev
-```
-
-Frontend runs at `http://localhost:5173` (or `3000` depending on Next.js config).
+You can choose to set up and run CIDECODE either using **Docker Compose** (recommended for quick and easy environment setup) or **locally** on your host machine.
 
 ---
+
+### Track A — Docker Compose Setup (Recommended)
+
+Running the entire stack with Docker Compose handles database initialization, dependency resolution, and routing automatically.
+
+#### Prerequisites for Docker
+
+- **Docker** (v20.10+) and **Docker Compose** installed on your system.
+- **Ollama** installed on your host machine (for local LLM assistant).
+  - Pull the required model: `ollama pull qwen3:8b`
+  - Ensure Ollama is configured to accept external connections (by default, Docker containers communicate with the host via `host.docker.internal`). On Linux, run Ollama with the environment variable `OLLAMA_HOST=0.0.0.0` set (or update your systemd service config).
+
+#### Step-by-Step Execution
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/your-org/STARDUST_CRUSADERS.git
+   cd STARDUST_CRUSADERS
+   ```
+
+2. **Configure Frontend Environment variables:**
+   The frontend communicates with the backend API. Make sure `figma_frontend/bank-statement-dashboard/.env.local` exists. If not, copy it:
+   ```bash
+   cp figma_frontend/bank-statement-dashboard/.env.local.example figma_frontend/bank-statement-dashboard/.env.local
+   ```
+
+3. **Build and start the containers:**
+   From the root of the project, run:
+   ```bash
+   docker compose up --build
+   ```
+
+4. **Verify services are running:**
+   - **Next.js Frontend:** [http://localhost:3000](http://localhost:3000)
+   - **FastAPI Backend:** [http://localhost:8000](http://localhost:8000)
+   - **API Swagger Documentation:** [http://localhost:8000/docs](http://localhost:8000/docs)
+   - **PostgreSQL Database:** Port `5432` on localhost (user: `cidecode`, password: `cidecode`, database: `cidecode`)
+
+5. **Automatic DB Migration & Seeding:**
+   On startup, the backend container automatically checks for the database tables, creates them if missing, and seeds them using the historical Phase 7 & 8 outputs (CSVs from the repository). You do not need to perform manual migrations or import SQL files.
+
+#### Managing the Docker Stack
+
+- **Run in detached mode:** `docker compose up -d`
+- **Stop the containers:** `docker compose down`
+- **View logs:** `docker compose logs -f` (or target a specific service like `docker compose logs -f backend`)
+- **Tear down volumes (reset DB):** `docker compose down -v`
+
+---
+
+### Track B — Local Development Setup
+
+If you prefer to run the application components individually without Docker:
+
+#### Prerequisites for Local
+
+- **Python 3.11+**
+- **Node.js 20+** (with npm/yarn)
+- **PostgreSQL 15+** (running on port 5432)
+- **Tesseract OCR** (required for processing scanned statement files via OCR):
+  - Ubuntu/Debian: `sudo apt-get install tesseract-ocr`
+  - macOS: `brew install tesseract`
+  - Windows: Install from UB Mannheim binaries and add to PATH.
+- **Ollama**:
+  - Pull the model: `ollama pull qwen3:8b`
+
+#### Backend Setup
+
+1. **Navigate to the root directory and set up virtual environment:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   ```
+
+2. **Install Python dependencies:**
+   Install both global packages and backend-specific packages:
+   ```bash
+   pip install -r requirements.txt
+   pip install -r backend/requirements.txt
+   ```
+
+3. **Configure Environment:**
+   If using custom PostgreSQL configuration, create a `.env` file inside the `backend` folder:
+   ```bash
+   # Example backend/.env content:
+   DATABASE_URL=postgresql+asyncpg://cidecode:cidecode@localhost:5432/cidecode
+   DATABASE_URL_SYNC=postgresql+psycopg2://cidecode:cidecode@localhost:5432/cidecode
+   ```
+   *Note: If PostgreSQL is not detected on localhost:5432 at startup, the backend automatically falls back to an SQLite database (`backend/cidecode.db`).*
+
+4. **Run the FastAPI server:**
+   ```bash
+   cd backend
+   python main.py
+   # Or run via uvicorn:
+   # uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+   The backend auto-migrates and seeds itself on startup.
+
+#### Frontend Setup
+
+1. **Navigate to Next.js project directory:**
+   ```bash
+   cd figma_frontend/bank-statement-dashboard
+   ```
+
+2. **Install Node.js dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Set Environment variables:**
+   Ensure `.env.local` is present (copy from `.env.local.example` if needed) and verify the parameters:
+   ```env
+   NEXT_PUBLIC_API_BASE=http://localhost:8000
+   NEXT_PUBLIC_API_URL=http://localhost:8000
+   ```
+
+4. **Run Next.js Dev Server:**
+   ```bash
+   npm run dev
+   ```
+   The dashboard will be active at [http://localhost:3000](http://localhost:3000) (or `http://localhost:3001` depending on port occupancy).
+
+---
+
 
 ## Project Structure
 
@@ -373,7 +448,6 @@ STARDUST_CRUSADERS/
 │   ├── aml_inference.py       # Inference integration
 │   └── reporting.py           # Analytics report generation
 │
-├── phase9/                    # XGBoost supervised scoring (training artefacts)
 │
 ├── aml_model/                 # Standalone Isolation Forest pipeline
 │   ├── train.py               # Training entry point
@@ -447,8 +521,7 @@ curl -X POST http://localhost:8000/api/v1/assistant/chat \
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key |
+| `NEXT_PUBLIC_API_BASE` | Backend API URL |
 
 ---
 

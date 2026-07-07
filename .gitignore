@@ -125,6 +125,23 @@ aml_model/outputs/
 aml_model/ground_truth_evaluator/outputs/
 
 # =========================
+# Input Files
+# =========================
+*.pdf
+*.json
+*.csv
+*.txt
+*.xls
+*.xlsx
+*.json
+*.yaml
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.svg
+
+# =========================
 # Keep Important Files
 # =========================
 !README.md

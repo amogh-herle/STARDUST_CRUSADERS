@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { uploadStatements, type UploadResult } from "@/lib/api";
+import { uploadStatements, type UploadResult, updateCase } from "@/lib/api";
 import { getSession } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/client";
 import { NewCaseModal, type Case } from "./Topbar";
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".csv", ".xlsx", ".xls", ".docx", ".png", ".jpg", ".jpeg"];
@@ -89,19 +88,11 @@ export default function UploadZone({
       const caseContext = activeCase || currentCase;
       if (caseContext && user) {
         try {
-          const supabase = createClient();
           const fileNames = validFiles.map((f) => f.file.name);
-          const { error: updateError } = await supabase
-            .from("cases")
-            .update({
-              upload_id: result.upload_id,
-              uploaded_files: fileNames,
-            })
-            .eq("id", caseContext.id);
-
-          if (updateError) {
-            console.warn("Failed to update case file links:", updateError);
-          }
+          await updateCase(caseContext.id, {
+            upload_id: result.upload_id,
+            uploaded_files: fileNames,
+          });
         } catch (dbErr) {
           console.warn("Database error linking files to case:", dbErr);
         }

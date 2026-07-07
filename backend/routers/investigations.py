@@ -15,9 +15,10 @@ GET   /{id}/evidence   List evidence items
 
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 
 from dependencies import get_db
 from models import Investigation, EvidenceItem, Account
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/investigations", tags=["Investigations"])
 async def create_investigation(
     payload: InvestigationCreate,
     db: AsyncSession = Depends(get_db),
+    x_user_id: Optional[str] = Header(None),
 ):
     """
     Create a new investigation case. Typically triggered when an
@@ -47,15 +49,39 @@ async def create_investigation(
                 detail=f"Seed account {payload.seed_account_id} not found"
             )
 
+    # Resolve names
+    name = payload.name or payload.case_name or "Unnamed Case"
+    case_name = payload.case_name or name
+
+    # Resolve case number
+    case_number = payload.case_number
+    if not case_number:
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        suffix = uuid.uuid4().hex[:4].upper()
+        case_number = f"CASE-{today}-{suffix}"
+
+    user_uuid = None
+    if x_user_id:
+        try:
+            user_uuid = uuid.UUID(x_user_id)
+        except ValueError:
+            pass
+
     investigation = Investigation(
-        name=payload.name,
+        name=name,
+        case_name=case_name,
+        case_number=case_number,
         description=payload.description,
         seed_account_id=payload.seed_account_id,
-        status="open",
+        status=payload.status or "open",
+        priority=payload.priority or "medium",
+        created_by=user_uuid,
     )
     db.add(investigation)
     await db.flush()
+    await db.commit()
     await db.refresh(investigation)
+    
     return InvestigationOut.model_validate(investigation)
 
 
@@ -65,10 +91,18 @@ async def list_investigations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    x_user_id: Optional[str] = Header(None),
 ):
     q = select(Investigation)
     if status:
         q = q.where(Investigation.status == status)
+
+    if x_user_id:
+        try:
+            user_uuid = uuid.UUID(x_user_id)
+            q = q.where(Investigation.created_by == user_uuid)
+        except ValueError:
+            pass
 
     count_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(count_q)).scalar_one()
@@ -110,10 +144,16 @@ async def update_investigation(
         raise HTTPException(status_code=404, detail="Investigation not found")
 
     update_data = payload.model_dump(exclude_unset=True)
+    if "case_name" in update_data and "name" not in update_data:
+        update_data["name"] = update_data["case_name"]
+    elif "name" in update_data and "case_name" not in update_data:
+        update_data["case_name"] = update_data["name"]
+
     for field, value in update_data.items():
         setattr(inv, field, value)
 
     await db.flush()
+    await db.commit()
     await db.refresh(inv)
     return InvestigationOut.model_validate(inv)
 
@@ -127,6 +167,7 @@ async def delete_investigation(
     if not inv:
         raise HTTPException(status_code=404, detail="Investigation not found")
     await db.delete(inv)
+    await db.commit()
 
 
 @router.post("/{investigation_id}/evidence", status_code=201)
