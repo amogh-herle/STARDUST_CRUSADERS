@@ -11,6 +11,7 @@ identical regardless of which backend is active.
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 
 from config import settings
 from schemas import AssistantChatRequest, AssistantChatResponse
@@ -42,7 +43,11 @@ async def assistant_chat(payload: AssistantChatRequest):
     if payload.community_id is not None and not assistant_service.repository.get_community(payload.community_id):
         raise HTTPException(status_code=404, detail=f"Community {payload.community_id} not found in Phase 8 analytics outputs")
 
-    answer, sources = assistant_service.ask(
+    # assistant_service.ask() is a synchronous call that can block for tens of
+    # seconds across multiple LLM round trips; run it off the event loop so it
+    # doesn't stall other concurrent requests.
+    answer, sources = await run_in_threadpool(
+        assistant_service.ask,
         question=payload.question,
         account_id=payload.account_id,
         community_id=payload.community_id,

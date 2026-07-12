@@ -28,7 +28,6 @@ def get_account_isolation_scores(df: pd.DataFrame, model_name: str = "isolation_
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, aml_root)
     try:
-        from features.feature_engineering import FeatureEngineer  # type: ignore
         from models.isolation_forest_trainer import IsolationForestTrainer  # type: ignore
     except Exception as e:
         print(f"[aml_inference] Failed to import aml_model modules: {e}")
@@ -47,12 +46,8 @@ def get_account_isolation_scores(df: pd.DataFrame, model_name: str = "isolation_
             print(f"✗ missing columns: {missing_columns}")
             return {}
         print("✓ schema compatible")
-
-        fe = FeatureEngineer(verbose=False)
-        df_feat = fe.fit_transform(adapted_df)
-        feat_cols = [c for c in FeatureEngineer.feature_columns() if c in df_feat.columns]
     except Exception as e:
-        print(f"[aml_inference] Feature engineering failed: {e}")
+        print(f"[aml_inference] Schema adaptation failed: {e}")
         return {}
 
     trainer = IsolationForestTrainer(model_dir=os.path.join(aml_root, "outputs", "models"), verbose=False)
@@ -62,15 +57,22 @@ def get_account_isolation_scores(df: pd.DataFrame, model_name: str = "isolation_
         print(f"[aml_inference] Could not load model '{model_name}': {e}")
         return {}
 
+    if trainer.feature_engineer_ is None:
+        print(f"[aml_inference] Model '{model_name}' was saved without a frozen "
+              f"FeatureEngineer (old format); refusing to score to avoid leakage. Retrain.")
+        return {}
+
     try:
-        scores = trainer.predict_score(df_feat)
+        # predict_on_raw() runs adapted_df through the SAME FeatureEngineer that
+        # was fitted at training time (frozen stats) — fitting a fresh one here
+        # on this small uploaded batch would let it establish its own baseline
+        # and silently reintroduce the leakage this model was designed to avoid.
+        df_feat = trainer.predict_on_raw(adapted_df)
     except Exception as e:
         print(f"[aml_inference] Prediction error: {e}")
         return {}
 
-    df_feat = df_feat.copy()
-    df_feat["_isolation_score"] = scores
-    agg = df_feat.groupby("account_id")["_isolation_score"].agg(["mean", "max"]).reset_index()
+    agg = df_feat.groupby("account_id")["anomaly_score"].agg(["mean", "max"]).reset_index()
     out = {row["account_id"]: {"mean_score": float(row["mean"]), "max_score": float(row["max"])} for _, row in agg.iterrows()}
     print(f"[aml_inference] Produced isolation scores for {len(out)} accounts")
     return out

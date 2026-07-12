@@ -1,6 +1,6 @@
 /**
  * Typed API client for the CIDECODE FastAPI backend.
- * Base URL is read from NEXT_PUBLIC_API_URL (default: http://localhost:8000)
+ * Base URL is read from NEXT_PUBLIC_API_BASE (default: http://localhost:8000)
  */
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";

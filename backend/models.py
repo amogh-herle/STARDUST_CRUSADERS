@@ -256,7 +256,7 @@ class Investigation(Base):
     # open | active | closed | escalated
     status: Mapped[str] = mapped_column(String(20), default="open")
     priority: Mapped[str] = mapped_column(String(50), default="medium")
-    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Linked rings (stored as JSON array of ring_ids)
     linked_ring_ids: Mapped[Optional[list]] = mapped_column(JSON, default=list)

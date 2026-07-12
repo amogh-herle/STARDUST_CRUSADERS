@@ -28,12 +28,14 @@ try:
         COLUMN_ROLE_KEYWORDS, CONTENT_PATTERNS,
         HINDI_COLUMN_MAP, BANK_NAME_KEYWORDS,
         DATE_FORMATS, CHANNEL_KEYWORDS,
+        ENABLE_ONLINE_IFSC_LOOKUP,
     )
 except ImportError:
     from ingestion_config import (
         COLUMN_ROLE_KEYWORDS, CONTENT_PATTERNS,
         HINDI_COLUMN_MAP, BANK_NAME_KEYWORDS,
         DATE_FORMATS, CHANNEL_KEYWORDS,
+        ENABLE_ONLINE_IFSC_LOOKUP,
     )
 
 
@@ -69,6 +71,10 @@ def lookup_bank_via_ifsc(ifsc_code: str, timeout: float = 3.0) -> str | None:
         return None
     if code in _IFSC_LOOKUP_CACHE:
         return _IFSC_LOOKUP_CACHE[code]
+    if not ENABLE_ONLINE_IFSC_LOOKUP:
+        offline = _OFFLINE_IFSC_PREFIX_MAP.get(code[:4])
+        _IFSC_LOOKUP_CACHE[code] = offline
+        return offline
     try:
         req = urllib.request.Request(
             f"https://ifsc.razorpay.com/{code}",

@@ -262,3 +262,15 @@ PAYTM_AMOUNT_COL = "AMT_TXN_LCY"
 BOB_BENEF_ACCT_COL = "BENEF/REMIT ACCT NO"
 BOB_BENEF_IFSC_COL = "BENEF/REMIT IFSC CODE"
 BOB_BENEF_NAME_COL = "BENEF/REMIT ACCT NAME"
+
+# ---------------------------------------------------------------------------
+# IFSC bank-name lookup: schema_detector.lookup_bank_via_ifsc() can resolve a
+# fuller bank name via the public ifsc.razorpay.com API, falling back to the
+# offline prefix map on failure. Off by default — statements processed here
+# may contain sensitive investigation data, so no IFSC codes are sent off-host
+# unless explicitly opted in.
+# ---------------------------------------------------------------------------
+import os as _os
+ENABLE_ONLINE_IFSC_LOOKUP = _os.environ.get(
+    "CIDECODE_ENABLE_ONLINE_IFSC_LOOKUP", "false"
+).strip().lower() in ("1", "true", "yes")

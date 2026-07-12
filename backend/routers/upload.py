@@ -6,28 +6,22 @@ runs Phase 6 ingestion + Phase 7 cleaning, and loads results into
 PostgreSQL via bulk insert.
 
 POST /                Upload one or more statement files
-GET  /status/{id}     Check async processing status
 """
 
 import os
 import uuid
 import subprocess
-import shutil
 import pandas as pd
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks, Query
-from sqlalchemy import select, delete
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dependencies import get_db
-from models import Account, Transaction
 from schemas import UploadResponse
 from config import settings
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
-
-# In-memory job status store (replace with Redis in production)
-_job_status: dict[str, dict] = {}
 
 SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".pdf", ".png", ".jpg", ".jpeg"}
 
@@ -84,9 +78,8 @@ async def get_analytics_status():
 
 @router.post("/", response_model=UploadResponse)
 async def upload_statements(
-    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
-    workers: int = Query(4, description="Number of worker processes for parallel ingestion"),
+    workers: int = Query(4, ge=1, le=8, description="Number of worker processes for parallel ingestion"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -104,28 +97,37 @@ async def upload_statements(
     warnings = []
 
     for f in files:
-        ext = os.path.splitext(f.filename or "")[1].lower()
-        if ext not in SUPPORTED_EXTENSIONS:
+        safe_name = os.path.basename(f.filename or "")
+        ext = os.path.splitext(safe_name)[1].lower()
+        if not safe_name or ext not in SUPPORTED_EXTENSIONS:
             warnings.append(f"{f.filename}: unsupported format, skipped")
             continue
 
         size_bytes = 0
-        dest = os.path.join(upload_dir, f.filename)
+        oversized = False
+        dest = os.path.join(upload_dir, safe_name)
         with open(dest, "wb") as out:
             while chunk := await f.read(1024 * 1024):
                 size_bytes += len(chunk)
                 if size_bytes > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-                    warnings.append(f"{f.filename}: exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit")
+                    oversized = True
                     break
                 out.write(chunk)
+
+        if oversized:
+            warnings.append(f"{f.filename}: exceeds {settings.MAX_UPLOAD_SIZE_MB}MB limit, skipped")
+            os.remove(dest)
+            continue
+
         saved_files.append(dest)
 
     if not saved_files:
         raise HTTPException(status_code=400, detail="No valid files uploaded")
 
-    # Run pipeline synchronously (for hackathon demo; use BackgroundTasks for production)
-    ingested_path, cleaned_path, analytics_out, pipeline_report = _run_pipeline(
-        upload_dir, upload_id, warnings, workers=workers
+    # Pipeline runs several minutes-long subprocess calls; offload to a thread
+    # so it doesn't block the event loop for other concurrent requests.
+    ingested_path, cleaned_path, analytics_out, pipeline_report = await run_in_threadpool(
+        _run_pipeline, upload_dir, upload_id, warnings, workers=workers
     )
 
     if not cleaned_path or not os.path.exists(cleaned_path):

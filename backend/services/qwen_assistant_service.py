@@ -88,7 +88,7 @@ class QwenAssistantService:
         self.model_name = model_name
         
         # Use OpenAI SDK pointing at the local server (e.g. Ollama or vLLM)
-        self._client = OpenAI(base_url=f"{self.base_url}/v1", api_key="ollama")
+        self._client = OpenAI(base_url=f"{self.base_url}/v1", api_key="ollama", timeout=REQUEST_TIMEOUT)
 
     # ------------------------------------------------------------------
     # Public API — matches AssistantService.ask()

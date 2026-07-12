@@ -78,7 +78,7 @@ class Base(DeclarativeBase):
 # Utility: create all tables (used at startup in dev/demo mode)
 # ---------------------------------------------------------------------------
 async def create_tables():
-    """Drop-and-recreate all tables. Only call in dev/demo mode."""
+    """Create all tables that don't already exist. Safe to call on every startup."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

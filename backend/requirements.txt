@@ -1,1 +1,8 @@
 openai>=1.0.0
+
+# Password hashing (backend/routers/auth.py)
+bcrypt==4.2.0
+
+# SQLite fallback driver used by backend/database.py when Postgres is
+# unreachable on localhost:5432 (local dev without Docker/Postgres)
+aiosqlite==0.20.0
